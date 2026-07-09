@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# 数据(年报 PDF 不入库、不重分发)
+data/*
+!data/.gitkeep
+
+# 索引/缓存/模型
+*.faiss
+volumes/
+models/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
