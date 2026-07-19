@@ -16,6 +16,8 @@ dependencies = [
     # "llama-index",
     # "langchain", "langgraph",
     # "langfuse",
+    "pymupdf>=1.27.1",
+    "pdfplumber>=0.11.10",
 ]
 
 [dependency-groups]
@@ -26,5 +28,7 @@ line-length = 100
 target-version = "py311"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
+strict = true
+untyped_calls_exclude = ["pymupdf"]
