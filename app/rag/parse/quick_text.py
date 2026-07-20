@@ -1,6 +1,6 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 from typing import cast
-from models import DocChunk
+from .models import DocChunk
 import pymupdf
 
 SCANNED_CHAR_THRESHOLD = 20  # 一页文字少于这么多字符 -> 判扫描页(图片，没有文字层)
