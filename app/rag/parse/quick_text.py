@@ -1,6 +1,6 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 from typing import cast
-
+from models import DocChunk
 import pymupdf
 
 SCANNED_CHAR_THRESHOLD = 20  # 一页文字少于这么多字符 -> 判扫描页(图片，没有文字层)
@@ -24,10 +24,26 @@ def extract_text_fast(path: str) -> list[str]:
     return pages
 
 
-if __name__ == "__main__":
-    path = "data/京东方A 2025年报.pdf"
+def text_to_chunks(path: str) -> list[DocChunk]:
+    """抽取文本并转换为DocChunk列表"""
+    chunks: list[DocChunk] = []
     with pymupdf.open(path) as doc:
         for i in range(doc.page_count):
             page = doc[i]
-            n = len(page_text(page).strip())
-            print(f"第{i + 1}页：{n}字符， 扫描页={is_scanned_page(page)}")
+            if is_scanned_page(page):
+                continue
+            txt = page_text(page).strip()
+            if txt:
+                chunks.append(DocChunk(text=txt, page=i + 1, type="paragraph", source_file=path))
+    return chunks
+
+
+if __name__ == "__main__":
+    path = "data/京东方A 2025年报.pdf"
+    chunks = text_to_chunks(path)
+    print(chunks)
+    with pymupdf.open(path) as doc:
+        for block in doc[11].get_text("blocks"):
+            x0, y0, x1, y1, text, block_no, block_type = block
+            if block_type == 0:
+                print(block_no, repr(text[:30]))

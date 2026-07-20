@@ -8,7 +8,3 @@ class DocChunk(BaseModel):
     type: Literal["paragraph", "table", "title"]
     source_file: str = Field(..., description="源文件路径")
     table_md: str | None = Field(default=None, description="给LLM用，非表格为None")
-
-doc = DocChunk(text="x", page=1, type="paragraph", source_file="x.pdf").model_dump()
-print(doc)
-print(DocChunk.model_validate(doc))
