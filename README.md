@@ -14,8 +14,8 @@
 ## 🚧 当前进度(Roadmap)
 > 诚实标注:这是一个转型学习项目,以下按周推进,`README` 随进度更新。
 - [x] 项目脚手架 + LLM 调用打通(DeepSeek/Qwen,openai 兼容 SDK;同步 / 流式 / 异步并发)
-- [ ] **LLM Gateway**:FastAPI + SSE 流式 + 超时重试 + token 计数 + 结构化日志
-- [ ] **文档解析入库**:PDF / 表格 → 中文分块 → embedding(bge-m3)→ Milvus
+- [x] **LLM Gateway**:FastAPI + SSE 流式 + 超时重试 + token 计数 + 结构化日志
+- [x] **文档解析入库**:PDF / 表格 → 中文分块 → embedding(bge-m3)→ Milvus
 - [ ] **RAG 闭环**:向量检索 + 页码引用溯源 + 无证据拒答 + 评测集
 - [ ] **Agent**:Function Calling 工具循环(文档检索 + 财务指标)+ HITL + 执行日志
 - [ ] **检索增强**:混合检索(BM25/RRF)+ rerank + RAGAS 评测 + badcase 优化

@@ -6,13 +6,25 @@ import pymupdf
 SCANNED_CHAR_THRESHOLD = 20  # 一页文字少于这么多字符 -> 判扫描页(图片，没有文字层)
 
 
+def page_body_text(page: pymupdf.Page, margin_frac: float = 0.07) -> str:
+    """获取页面主体文本，排除页眉页脚"""
+    r = page.rect
+    body = pymupdf.Rect(
+        r.x0,
+        r.y0 + r.height * margin_frac,
+        r.x1,
+        r.y1 - r.height * margin_frac,
+    )
+    return cast(str, page.get_text(clip=body))
+
+
 def page_text(page: pymupdf.Page) -> str:
     # get_text() 有多种返回(str/list/dict),默认取纯文本;cast 成 str 才能 .strip()
     return cast(str, page.get_text())
 
 
 def is_scanned_page(page: pymupdf.Page) -> bool:
-    return len(page_text(page).strip()) < SCANNED_CHAR_THRESHOLD
+    return len(page_body_text(page).strip()) < SCANNED_CHAR_THRESHOLD
 
 
 def extract_text_fast(path: str) -> list[str]:
@@ -20,7 +32,7 @@ def extract_text_fast(path: str) -> list[str]:
     pages: list[str] = []
     with pymupdf.open(path) as doc:
         for i in range(doc.page_count):
-            pages.append(page_text(doc[i]))
+            pages.append(page_body_text(doc[i]))
     return pages
 
 
@@ -32,7 +44,7 @@ def text_to_chunks(path: str) -> list[DocChunk]:
             page = doc[i]
             if is_scanned_page(page):
                 continue
-            txt = page_text(page).strip()
+            txt = page_body_text(page).strip()
             if txt:
                 chunks.append(DocChunk(text=txt, page=i + 1, type="paragraph", source_file=path))
     return chunks
