@@ -12,3 +12,4 @@ with pymupdf.open(path) as doc:
     for chunk in chunks:
         print(f"token 数量: {count_tokens(chunk)}")
     print(chunks)
+
