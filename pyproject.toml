@@ -21,6 +21,9 @@ dependencies = [
     "mineru[all]>=3.4.4",
     "langchain-text-splitters>=1.1.2",
     "tiktoken>=0.13.0",
+    "pymilvus[milvus-lite]>=3.0.0",
+    "flagembedding>=1.4.0",
+    "sentence-transformers>=5.6.0",
 ]
 
 [dependency-groups]
@@ -35,3 +38,7 @@ python_version = "3.12"
 ignore_missing_imports = true
 strict = true
 untyped_calls_exclude = ["pymupdf"]
+
+[[tool.mypy.overrides]]
+module = ["pymilvus", "pymilvus.*", "FlagEmbedding", "FlagEmbedding.*"]
+ignore_missing_imports = true
