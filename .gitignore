@@ -29,3 +29,6 @@ models/
 
 # Jupyter
 .ipynb_checkpoints/
+
+mineru_out/
+doc/
