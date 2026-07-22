@@ -31,3 +31,5 @@ models/
 .ipynb_checkpoints/
 
 mineru_out/
+
+*.db
