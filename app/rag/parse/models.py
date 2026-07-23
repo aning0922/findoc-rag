@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 
 class DocChunk(BaseModel):
-    text: str = Field(..., description="检索用文本，表哥这块放标题+摘要")
+    text: str = Field(..., description="检索用文本，表格这块放标题+摘要")
     page: int = Field(ge=1)
     type: Literal["paragraph", "table", "title"]
     source_file: str = Field(..., description="源文件路径")
