@@ -4,8 +4,8 @@ hello_llm.py — 你的第一个 LLM 调用(Week 1 热身)
 
 跑起来(环境已在第 0 周配好,约 5 分钟):
   1) 在 findoc-rag 目录:  uv sync            # 装依赖(openai/python-dotenv 已在 pyproject,别用 pip)
-  2) cp .env.example .env,填 DEEPSEEK_API_KEY(deepseek.com 注册→实名→充值几元有额度)
-     再把 LLM_MODEL 填成控制台当前可用模型名(deepseek-chat 将于 2026-07-24 退役)
+  2) cp .env.example .env,填 DEEPSEEK_API_KEY
+     LLM_MODEL 默认使用 deepseek-v4-flash,也可以改成控制台中的其他可用模型
   3) 运行:                uv run python hello_llm.py   # 别手动 activate,交给 uv run
 """
 
@@ -16,7 +16,7 @@ from openai import OpenAI, AsyncOpenAI   # DeepSeek 兼容 OpenAI 的 SDK,直接
 
 load_dotenv()  # 把 .env 的变量加载进环境变量
 
-MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")  # 读配置别硬编码(deepseek-chat 07-24 退役→deepseek-v4-flash)
+MODEL = os.environ.get("LLM_MODEL", "deepseek-v4-flash")  # 从环境变量读取模型名
 
 # DeepSeek 复用 OpenAI 的 SDK,只是换 base_url。类似 C# 里 new HttpClient + 配 BaseAddress。
 client = OpenAI(

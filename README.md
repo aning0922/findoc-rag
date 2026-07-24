@@ -1,70 +1,158 @@
-# FinDoc Workflow Agent · 企业财报研究与审核工作流
+# FinDoc RAG
 
-> 目标:基于 FastAPI + 可信 RAG + Function Calling/LangGraph,把财报上传、检索、计算、草稿、校验、审批和审计串成可恢复业务流程。
-> 个人转型自建项目 · 2026-07 起 · 🚧 建设中(按 16 周计划推进,每周更新)
+中文财报解析与可溯源向量检索原型。
 
-## 它解决什么工程问题
-- 长文档(年报含大量表格)的解析、分块与**可溯源检索**
-- RAG 召回质量:向量 baseline → 混合检索/rerank 对照 → badcase 回归
-- 生产可信:引用溯源、无证据拒答、权限隔离、HITL、失败恢复与审计
-- 智能体编排:确定性工具 + LangGraph 状态工作流,不是让 LLM 随意执行全部步骤
-- 工程化:Gateway、PostgreSQL、React 产品薄层、Docker、质量/延迟/token/成本
+> **项目状态：建设中。** 当前重点是解析契约、稳定分块 ID、幂等入库和检索评测。
+> API、答案生成、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
 
-## 🚧 当前进度(Roadmap)
-> 诚实标注:只把主仓里已有代码列为完成。`learning-lab/gateway` 的可运行 Gateway 是原型,第 8 周迁入本仓后才算主项目集成完成。
-- [x] 项目脚手架 + LLM 调用打通(DeepSeek/Qwen,openai 兼容 SDK;同步 / 流式 / 异步并发)
-- [x] **Gateway 原型**:`learning-lab/gateway` 已完成 FastAPI/SSE/超时重试/token/structlog;主仓集成待第 8 周
-- [x] **文档底座**:PDF/表格 → 中文分块 → bge-m3 → 3 家 7451 块进入 Milvus Lite
-- [ ] **Retriever Gate**:稳定 ID、幂等入库、filters、20-30 条题与 Hit@K/MRR/P95
-- [ ] **RAG 产品闭环**:上传/状态/SSE 问答 + 页码引用 + 无证据拒答
-- [ ] **Agent v0**:手写 Function Calling → LangChain 薄集成 + Run 时间线
-- [ ] **质量/隔离**:hybrid/rerank 评测 + PostgreSQL/鉴权/workspace 隔离
-- [ ] **Workflow**:LangGraph + checkpoint + HITL + 恢复/审计/系统集成
-- [ ] **工程化**:Docker Compose + 全链路日志 + 成本/P95 + 故障演练
+## 项目目标
+
+FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可验证的 RAG 工程链路：
+
+- 从 PDF 或 MinerU 输出中提取正文、标题、表格和页码
+- 按中文文本特点进行分块，并保留来源元数据
+- 使用 bge-m3 生成向量，写入 Milvus Lite
+- 建立可重复的检索评测，记录 badcase、延迟和质量变化
+- 在检索可靠后，再增加引用回答、拒答、工具调用和审核工作流
+
+当前仓库只覆盖这条路线的前半段，不把规划中的能力描述为已经完成。
+
+## 当前状态
+
+| 模块 | 状态 | 说明 |
+|---|---|---|
+| LLM 调用示例 | 可运行 | DeepSeek OpenAI 兼容接口；包含同步、流式和异步并发示例 |
+| PDF 快速解析 | 原型可运行 | PyMuPDF 提取正文，pdfplumber 提取表格 |
+| MinerU 输出适配 | 修复中 | 已建立标题层级、表格正文和异常输入的契约测试，实现尚未全部通过 |
+| 中文分块 | 原型可运行 | 基于中文分隔符和 token 计数；稳定 ID 仍待实现 |
+| Embedding | 本地实验已跑通 | bge-m3，dense vector 维度为 1024 |
+| Milvus Lite | 本地实验已跑通 | 3 份公开年报、7,451 个块已完成本地入库；原始数据和数据库不提交 |
+| Retriever | 最小 baseline | 当前只有 dense top-k；filters、幂等更新和正式评测尚未完成 |
+| RAG API / Agent / Web | 计划中 | 尚无可运行实现 |
+
+“本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
+
+## 当前数据流
+
+```text
+PDF / MinerU content_list.json
+        ↓
+解析适配器
+        ↓
+DocChunk（text / page / type / source_file / table_md / section / chunk_id）
+        ↓
+中文递归分块
+        ↓
+bge-m3 dense embedding
+        ↓
+Milvus Lite
+        ↓
+dense top-k retrieval
+```
+
+目前链路终点是检索结果，还没有生成式回答、引用校验或无证据拒答。
+MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_list.json` 输出。
 
 ## 技术栈
 
-**已实现:**`Python 3.12` · `Pydantic` · `pytest` · `pymupdf/pdfplumber/MinerU` · `bge-m3` · `Milvus Lite` · `DeepSeek/Qwen OpenAI 兼容 API`
+- Python 3.11+
+- Pydantic
+- PyMuPDF / pdfplumber / MinerU 输出适配
+- LangChain Text Splitters / tiktoken
+- FlagEmbedding bge-m3
+- Milvus Lite
+- pytest
+- OpenAI Python SDK（调用 DeepSeek 兼容接口）
 
-**原型已实现、待主仓集成:**`FastAPI` · `asyncio` · `SSE` · `structlog`
+FastAPI、LangChain Agent、LangGraph、PostgreSQL、React 和 Docker Compose 属于后续路线，不是当前已实现技术栈。
 
-**计划中(完成后再移到上面):**`React/TypeScript` · `LangChain` · `LangGraph` · `PostgreSQL/SQLAlchemy/Alembic` · `JWT/RBAC` · `Docker Compose`
+## 快速开始
 
-## 目标架构
-```
-登录 → 上传/解析/索引 → 创建研究任务 → RAG 检索 / 财务计算
-     → 生成草稿 → 引用与数字校验 → 自动通过或等待 reviewer 审批
-     → 批准/驳回/恢复 → 保存结果与审计
+### 1. 安装依赖
 
-[Gateway: SSE/超时/重试] [RAG: 引用/拒答/评测] [Workflow: 状态/checkpoint/HITL]
-[可信度: workspace 隔离/工具权限/审计] [工程化: Docker/日志/P95/token/成本]
-```
-> (开发到对应阶段后把真实架构图 / 截图贴这里)
+需要先安装 [uv](https://docs.astral.sh/uv/)。
 
-## 关键指标(随开发填入真实数据)
-| 指标 | 数值 |
-|---|---|
-| 召回率(优化前→后) | __% → __% |
-| 答案忠实度(RAGAS) |  |
-| P95 延迟 | __ ms |
-| 单次问答成本 | __ |
-| 评测集规模 | __ 条 |
-
-## 本地运行
 ```bash
+git clone https://github.com/aning0922/findoc-rag.git
+cd findoc-rag
 uv sync
-cp .env.example .env          # 填 DEEPSEEK_API_KEY + LLM_MODEL
-uv run python hello_llm.py    # ✅ 现在就能跑:LLM 同步 / 流式 / 异步并发 demo
-
-# 以下随开发解锁后再去掉注释:
-# uvicorn app.api.main:app --reload       # 第 8 周主仓 API
-# docker compose up -d                    # 第 15 周完整编排
 ```
 
-## 目录
-- `app/gateway` LLM 网关 ｜ `app/rag` 解析/检索/重排 ｜ `app/agent` 工具调用 ｜ `app/api` FastAPI
-- `data/` 年报 PDF(**.gitignore,不入库、不重分发**)｜ `eval/` 评测集与脚本 ｜ `scripts/` 灌库/重建索引 ｜ `tests/`
+依赖包含文档解析和本地 Embedding 组件，首次安装及首次下载 bge-m3 可能耗时较长。
 
-## 合规声明
-仅基于公开披露文件,面向研究 / 合规 / 客服等内部信息检索场景。
-**所有输出附"不构成投资建议"免责声明,不做荐股 / 预测 / 量化 / 投顾。**
+### 2. 运行解析 smoke test
+
+这个测试会临时生成一份小型 PDF，不需要下载年报：
+
+```bash
+uv run pytest tests/test_parse.py -q
+```
+
+完整契约测试可以通过以下命令查看：
+
+```bash
+uv run pytest -q
+```
+
+当前 MinerU 解析契约仍在修复中，因此完整测试集尚未全部通过。公开主分支转为稳定状态前，会先让测试全部通过。
+
+### 3. 运行可选的 LLM 示例
+
+```bash
+cp .env.example .env
+# 在 .env 中填写 DEEPSEEK_API_KEY
+uv run python hello_llm.py
+```
+
+该脚本只是模型调用示例，不是 FinDoc RAG 的问答入口。
+
+## 仓库结构
+
+```text
+app/
+├── rag/
+│   ├── parse/          # PDF 快速解析与 MinerU 输出适配
+│   ├── chunk.py        # 中文分块与 JSONL 保存
+│   ├── embed.py        # bge-m3 Embedding
+│   ├── store.py        # Milvus Lite 建库、写入和搜索
+│   └── retriever.py    # 最小 dense retriever
+├── api/                # 预留，尚未实现
+├── gateway/            # 预留，尚未实现
+└── agent/              # 预留，尚未实现
+scripts/                # 解析、分块、Embedding 和 Milvus 实验脚本
+tests/                  # smoke test 与解析契约测试
+doc/                    # 解析器和分块决策记录
+data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
+eval/                   # 预留，正式评测尚未建立
+```
+
+当前 `scripts/` 中部分脚本仍使用作者的本地文件名，尚未整理成统一的端到端 CLI。
+
+## 已知限制
+
+- 完整测试集当前不是全绿状态
+- MinerU 标题层级、章节传播和表格检索文本契约仍在修复
+- `chunk_id` 目前使用随机 UUID，无法保证重复运行结果稳定
+- 入库脚本尚未实现可靠的幂等更新和删除语义
+- 当前只有 dense retrieval，没有 metadata filters、hybrid search 或 rerank
+- 尚未建立公开评测集，7,451 个块只是本地入库规模，不是质量指标
+- 没有 RAG 答案生成、引用验证、拒答、API、鉴权或多用户隔离
+- 没有可直接使用的 Web 产品界面
+
+## Roadmap
+
+1. 完成解析契约，补齐分块测试和稳定 ID
+2. 实现幂等入库、metadata filters 和可测试的 Retriever 接口
+3. 建立 20～30 条基础评测集，记录 Hit@K、MRR 和 P95
+4. 增加带页码引用和无证据拒答的 RAG API
+5. 增加 Function Calling、可恢复工作流和人工审核
+6. 增加鉴权、workspace 隔离、React 界面、Docker 和可观测性
+
+只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
+
+## 数据与用途声明
+
+- 仓库不包含年报 PDF、解析产物、向量数据库、模型文件或 API 密钥
+- 本地实验仅使用公开披露文件，原始文件的使用应遵守其来源条款
+- 本项目用于工程学习和信息检索研究，不构成投资建议
+- 生成式回答和自动审核尚未实现；未来版本的输出仍需人工核验
