@@ -33,6 +33,10 @@ dev = ["pytest", "ruff", "mypy"]
 line-length = 100
 target-version = "py311"
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
