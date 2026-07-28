@@ -6,12 +6,12 @@ from app.rag.parse.mineru_adapter import parse_mineru_output
 
 def test_mineru_rejects_non_list_json(tmp_path: Path):
     """
-    测试parse_mineru_output函数，当content_file为空时，抛出ValueError
+    测试parse_mineru_output函数，当json 没有解析出list时，抛出ValueError
     """
     content_file = tmp_path / "sample_content_list.json"
     content_file.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="json 没有解析出list"):
         parse_mineru_output(str(tmp_path), "dummy.pdf")
 
 
@@ -28,7 +28,7 @@ def test_mineru_rejects_unknown_type(tmp_path: Path):
 
 def test_mineru_preserves_title_hierarchy(tmp_path: Path):
     """
-    测试parse_mineru_output函数，当content_file为title_content_list时，返回的result为3个title
+    测试parse_mineru_output函数， 测试title层次结构
     """
     content_file = tmp_path / "title_content_list.json"
     content_file.write_text(
@@ -42,7 +42,7 @@ def test_mineru_preserves_title_hierarchy(tmp_path: Path):
 
 def test_mineru_propagates_section_hierarchy(tmp_path: Path):
     """
-    测试parse_mineru_output函数，当content_file为title_content_list时，返回的result的section为公司概况/主要业务
+    测试parse_mineru_output函数， 测试section层次结构
     """
     content_file = tmp_path / "title_content_list.json"
     content_file.write_text(
@@ -59,7 +59,7 @@ def test_mineru_propagates_section_hierarchy(tmp_path: Path):
 
 def test_mineru_table_body_is_searchable(tmp_path: Path):
     """
-    测试parse_mineru_output函数，当content_file为table_content_list时，返回的result的table_body为利润明细表
+    测试parse_mineru_output函数， table_body是否进入text字段
     """
     table_body = "| 项目 | 金额 | | 净利润专属项 | 98765 |"
     content_file = tmp_path / "table_content_list.json"
@@ -96,7 +96,7 @@ def test_mineru_preserves_mixed_element_order(tmp_path: Path):
 
 def test_mineru_rejects_missing_page_idx(tmp_path: Path):
     """
-    测试parse_mineru_output函数，当content_file为missing_page_idx_content_list时，抛出ValueError
+    测试parse_mineru_output函数， 测试page_idx为空时，抛出ValueError
     """
     content_file = tmp_path / "missing_page_idx_content_list.json"
     content_file.write_text(
@@ -115,17 +115,17 @@ def test_mineru_rejects_empty_title(tmp_path: Path):
         '[{"type":"text","text":"","text_level":1,"page_idx":0}]',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="标题为空"):
         parse_mineru_output(str(tmp_path), "dummy.pdf")
 
 def test_mineru_rejects_empty_table_body(tmp_path: Path):
     """
-    测试parse_mineru_output函数，当content_file为empty_table_body_content_list时，抛出ValueError
+    测试parse_mineru_output函数， 测试table_body为空时，抛出ValueError
     """
     content_file = tmp_path / "empty_table_body_content_list.json"
     content_file.write_text(
         '[{"type":"table","table_caption":["空表测试"],"table_body":"","page_idx":0}]',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="表格内容为空"):
         parse_mineru_output(str(tmp_path), "dummy.pdf")

@@ -1,8 +1,9 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
-import uuid
 from pathlib import Path
 from .parse.models import DocChunk
+import hashlib
+import json
 
 CHUNK_SIZE = 400
 CHUNK_OVERLAP = 60
@@ -76,6 +77,21 @@ def fixed_chunk(text: str, size: int = 500, overlap: int = 80) -> list[str]:
         start += size - overlap
     return chunks
 
+def build_stable_chunk_id(chunk: DocChunk, source_locator: str) -> str:
+    """
+    根据chunk和source_locator生成稳定ID
+    """
+    data_dict = {
+        "source_locator": source_locator,
+        "source_file": chunk.source_file,
+        "page": chunk.page,
+        "text": chunk.text,
+        "section": chunk.section,
+        "type": chunk.type,
+        "table_md": chunk.table_md,
+    }
+    json_data = json.dumps(data_dict, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(json_data.encode("utf-8")).hexdigest()
 
 def chunk_docment(blocks: list[DocChunk]) -> list[DocChunk]:
     """
@@ -86,28 +102,56 @@ def chunk_docment(blocks: list[DocChunk]) -> list[DocChunk]:
     Returns:
         list[DocChunk]: 分块后的文档块列表
     """
+    chunk_payload_map: dict[str, int] = {}
+
+    def build_chunk_payload(chunk: DocChunk) -> str:
+        """
+        构建chunk的唯一标识payload
+        """
+        data = {
+            "text": chunk.text,
+            "page": chunk.page,
+            "section": chunk.section,
+            "type": chunk.type,
+            "source_file": chunk.source_file,
+            "table_md": chunk.table_md,
+        }
+        json_data = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(json_data.encode("utf-8")).hexdigest()
+
+    def get_chunk_payload_idx(payload: str) -> int:
+        """
+        获取chunk的唯一标识payload的索引
+        """
+        if payload in chunk_payload_map:
+            idx = chunk_payload_map[payload]
+            chunk_payload_map[payload] += 1
+            return idx
+        chunk_payload_map[payload] = 1
+        return 0
+
     out: list[DocChunk] = []
-    section = ""
     for b in blocks:
         if b.type == "title":
-            section = b.text.strip()
-            pieces = [b.text]
-        elif b.type == "table":
+            continue
+        if b.type == "table":
             pieces = [b.text]
         else:
             pieces = recursive_chunk(b.text)
         for piece in pieces:
-            out.append(
-                DocChunk(
-                    text=piece,
-                    page=b.page,
-                    type=b.type,
-                    source_file=b.source_file,
-                    table_md=b.table_md,
-                    section=section or "未分节",
-                    chunk_id=str(uuid.uuid4()),
-                )
+            chunk = DocChunk(
+                text=piece,
+                page=b.page,
+                type=b.type,
+                source_file=b.source_file,
+                table_md=b.table_md,
+                section=b.section or "未分节",
             )
+            payload = build_chunk_payload(chunk)
+            idx = get_chunk_payload_idx(payload)
+            chunk_id = build_stable_chunk_id(chunk, str(idx))
+            chunk.chunk_id = chunk_id
+            out.append(chunk)
     return out
 
 
