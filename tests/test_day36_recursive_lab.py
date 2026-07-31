@@ -29,6 +29,7 @@ def test_recursive_fixed_length():
 
 
 def test_recursive_split_falls_back_when_separator_missing():
+    """分隔符列表中没有分隔符"""
     assert recursive_split("ABCDEFGHIJ", 4, ["\n", ""]) == ["ABCD", "EFGH", "IJ"]
 
 
@@ -37,4 +38,5 @@ def test_recursive_split_keeps_existing_separator():
 
 
 def test_recursive_split_counts_kept_separator_in_size():
+    """分隔符列表中包含分隔符"""
     assert recursive_split("甲乙丙丁。戊。", 4, ["。", ""]) == ["甲乙丙丁", "。", "戊。"]

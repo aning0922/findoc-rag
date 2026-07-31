@@ -23,8 +23,8 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 |---|---|---|
 | LLM 调用示例 | 可运行 | DeepSeek OpenAI 兼容接口；包含同步、流式和异步并发示例 |
 | PDF 快速解析 | 原型可运行 | PyMuPDF 提取正文，pdfplumber 提取表格 |
-| MinerU 输出适配 | 修复中 | 已建立标题层级、表格正文和异常输入的契约测试，实现尚未全部通过 |
-| 中文分块 | 原型可运行 | 基于中文分隔符和 token 计数；稳定 ID 仍待实现 |
+| MinerU 输出适配 | 契约测试通过 | 多级标题、section、顺序、表格正文、页码与异常输入已有成功/失败测试；仍依赖上游`content_list.json`质量 |
+| 中文分块 | 第6周理解Gate通过 | 中文分隔符+token计数、metadata复制、表格双表示与稳定ID已有测试；参数最优性待查询级评测 |
 | Embedding | 本地实验已跑通 | bge-m3，dense vector 维度为 1024 |
 | Milvus Lite | 本地实验已跑通 | 3 份公开年报、7,451 个块已完成本地入库；原始数据和数据库不提交 |
 | Retriever | 最小 baseline | 当前只有 dense top-k；filters、幂等更新和正式评测尚未完成 |
@@ -94,7 +94,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前 MinerU 解析契约仍在修复中，因此完整测试集尚未全部通过。公开主分支转为稳定状态前，会先让测试全部通过。
+当前基线为`59 passed`。测试全绿只表示已覆盖的行为符合契约,不替代真实检索评测。
 
 ### 3. 运行可选的 LLM 示例
 
@@ -130,9 +130,10 @@ eval/                   # 预留，正式评测尚未建立
 
 ## 已知限制
 
-- 完整测试集当前不是全绿状态
-- MinerU 标题层级、章节传播和表格检索文本契约仍在修复
-- `chunk_id` 目前使用随机 UUID，无法保证重复运行结果稳定
+- fast解析会跳过扫描页,不识别标题层级,且正文与表格分别收集后再拼接,不能保证原始元素顺序
+- MinerU adapter会按上游`text_level`生成section;若上游把复选框等正文误判为标题,adapter无法自行恢复真实层级
+- 当前`400/60`只是生产基线;Day38单样本中`400/10`与`400/60`输出相同,最优参数待查询级检索评测
+- 表格当前保持原子块,可能超过配置size;完全重复正文缺少真实来源定位时仍有身份歧义
 - 入库脚本尚未实现可靠的幂等更新和删除语义
 - 当前只有 dense retrieval，没有 metadata filters、hybrid search 或 rerank
 - 尚未建立公开评测集，7,451 个块只是本地入库规模，不是质量指标
@@ -141,12 +142,12 @@ eval/                   # 预留，正式评测尚未建立
 
 ## Roadmap
 
-1. 完成解析契约，补齐分块测试和稳定 ID
-2. 实现幂等入库、metadata filters 和可测试的 Retriever 接口
-3. 建立 20～30 条基础评测集，记录 Hit@K、MRR 和 P95
-4. 增加带页码引用和无证据拒答的 RAG API
-5. 增加 Function Calling、可恢复工作流和人工审核
-6. 增加鉴权、workspace 隔离、React 界面、Docker 和可观测性
+1. 验证COSINE/top-k、向量与chunk对齐,实现幂等更新和删除语义
+2. 完成metadata filters和可测试的Retriever接口
+3. 建立20～30条基础评测集,记录Hit@K、MRR和P95,再决定分块参数
+4. 增加带页码引用和无证据拒答的RAG API
+5. 增加Function Calling、可恢复工作流和人工审核
+6. 增加鉴权、workspace隔离、React界面、Docker和可观测性
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
 

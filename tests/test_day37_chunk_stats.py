@@ -8,7 +8,7 @@ def test_try_chunk_reports_coarse_and_fine_counts_from_different_lists(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-
+    
     coarse_blocks = []
     coarse_blocks.append(
         DocChunk(
