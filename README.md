@@ -25,9 +25,9 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | PDF 快速解析 | 原型可运行 | PyMuPDF 提取正文，pdfplumber 提取表格 |
 | MinerU 输出适配 | 契约测试通过 | 多级标题、section、顺序、表格正文、页码与异常输入已有成功/失败测试；仍依赖上游`content_list.json`质量 |
 | 中文分块 | 第6周理解Gate通过 | 中文分隔符+token计数、metadata复制、表格双表示与稳定ID已有测试；参数最优性待查询级评测 |
-| Embedding | 本地实验已跑通 | bge-m3，dense vector 维度为 1024 |
+| Embedding | 本地实验已跑通 | bge-m3，dense vector维度为1024；Day39用5条候选和1条查询完成脱离Milvus的观察性黑盒对照 |
 | Milvus Lite | 本地实验已跑通 | 3 份公开年报、7,451 个块已完成本地入库；原始数据和数据库不提交 |
-| Retriever | 最小 baseline | 当前只有 dense top-k；filters、幂等更新和正式评测尚未完成 |
+| Retriever | 当前实现baseline | Day39已在隔离实验中验证标准库COSINE/稳定top-k契约；`app/rag`仍只有dense top-k，filters、幂等更新和正式评测尚未完成 |
 | RAG API / Agent / Web | 计划中 | 尚无可运行实现 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
@@ -52,6 +52,8 @@ dense top-k retrieval
 
 目前链路终点是检索结果，还没有生成式回答、引用校验或无证据拒答。
 MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_list.json` 输出。
+
+Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
 
 ## 技术栈
 
@@ -94,7 +96,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前基线为`59 passed`。测试全绿只表示已覆盖的行为符合契约,不替代真实检索评测。
+当前基线为`99 passed`，其中40个为Day39标准库检索与独立Gate测试。测试全绿只表示已覆盖的行为符合契约,不替代真实检索评测或事实正确性。
 
 ### 3. 运行可选的 LLM 示例
 
@@ -120,8 +122,9 @@ app/
 ├── gateway/            # 预留，尚未实现
 └── agent/              # 预留，尚未实现
 scripts/                # 解析、分块、Embedding 和 Milvus 实验脚本
-tests/                  # smoke test 与解析契约测试
-doc/                    # 解析器和分块决策记录
+experiments/            # 分块、标准库向量检索与bge-m3小规模对照
+tests/                  # smoke test、契约测试与理解Gate测试
+doc/                    # 解析器、分块与向量检索决策记录
 data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
 eval/                   # 预留，正式评测尚未建立
 ```
@@ -132,17 +135,19 @@ eval/                   # 预留，正式评测尚未建立
 
 - fast解析会跳过扫描页,不识别标题层级,且正文与表格分别收集后再拼接,不能保证原始元素顺序
 - MinerU adapter会按上游`text_level`生成section;若上游把复选框等正文误判为标题,adapter无法自行恢复真实层级
-- 当前`400/60`只是生产基线;Day38单样本中`400/10`与`400/60`输出相同,最优参数待查询级检索评测
+- 当前`400/60`只是实现基线;Day38单样本中`400/10`与`400/60`输出相同,最优参数待查询级检索评测
 - 表格当前保持原子块,可能超过配置size;完全重复正文缺少真实来源定位时仍有身份歧义
 - 入库脚本尚未实现可靠的幂等更新和删除语义
 - 当前只有 dense retrieval，没有 metadata filters、hybrid search 或 rerank
+- Day39只验证了5条候选的精确COSINE/top-k链路；尚未验证`app/rag`向量与chunk对齐、幂等性或大规模检索质量
+- 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
 - 尚未建立公开评测集，7,451 个块只是本地入库规模，不是质量指标
 - 没有 RAG 答案生成、引用验证、拒答、API、鉴权或多用户隔离
 - 没有可直接使用的 Web 产品界面
 
 ## Roadmap
 
-1. 验证COSINE/top-k、向量与chunk对齐,实现幂等更新和删除语义
+1. 基于已验证的隔离COSINE/top-k契约，验证`app/rag`向量与chunk对齐,实现幂等更新和删除语义
 2. 完成metadata filters和可测试的Retriever接口
 3. 建立20～30条基础评测集,记录Hit@K、MRR和P95,再决定分块参数
 4. 增加带页码引用和无证据拒答的RAG API
