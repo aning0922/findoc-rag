@@ -19,6 +19,19 @@ def ensure_collection(client: MilvusClient, name: str, dim: int = DIM) -> None:
         client.create_collection(collection_name=name, dimension=dim, metric_type="COSINE")
 
 
+def ensure_document_collection(client: MilvusClient, name: str, dim: int = DIM) -> None:
+    if not client.has_collection(name):
+        client.create_collection(
+            collection_name=name,
+            dimension=dim,
+            primary_field_name="chunk_id",
+            id_type="string",
+            max_length=128,
+            vector_field_name="vector",
+            metric_type="COSINE",
+        )
+
+
 def insert_rows(client: MilvusClient, name: str, rows: list[dict[str, Any]]) -> int:
     """插入行"""
     client.insert(collection_name=name, data=rows)
@@ -44,7 +57,7 @@ def search(
     """
     搜索结果，返回距离和实体
     实体包含text, page, section, source_file, chunk_id, type, table_md
-    距离越小，越相似
+    这里的distance字段承载COSINE score，分数越大越相似。
     Args:
         client: Milvus客户端
         name: 集合名称
