@@ -2,7 +2,7 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** 当前重点是解析契约、稳定分块 ID、幂等入库和检索评测。
+> **项目状态：建设中。** 解析、分块、向量摄取和可测试 Retriever 已有小样本证据；Day41 已建立 6 题检索基线，当前重点是扩展正式评测并完成联合闭卷验证。
 > API、答案生成、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
 
 ## 项目目标
@@ -27,7 +27,8 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | 中文分块 | 第6周理解Gate通过 | 中文分隔符+token计数、metadata复制、表格双表示与稳定ID已有测试；参数最优性待查询级评测 |
 | Embedding | 本地实验已跑通 | bge-m3，dense vector维度为1024；Day39用5条候选和1条查询完成脱离Milvus的观察性黑盒对照 |
 | Milvus Lite | 本地实验已跑通 | 3 份公开年报、7,451 个块已完成本地入库；原始数据和数据库不提交 |
-| Retriever | 当前实现baseline | Day39已在隔离实验中验证标准库COSINE/稳定top-k契约；`app/rag`仍只有dense top-k，filters、幂等更新和正式评测尚未完成 |
+| 向量摄取与文档生命周期 | 小样本Gate通过 | Day40已验证合法chunk、embedding text、vector和Milvus row一一对应，并实现一种按`document_id`删除后重建的收敛策略；尚无事务或原子替换 |
+| Retriever | Day41 L2 Gate通过 | 已有依赖注入、稳定`SearchHit`、输入/数据错误契约、可信workspace与source_file过滤；真实schema尚无workspace字段，6题baseline不等于正式评测 |
 | RAG API / Agent / Web | 计划中 | 尚无可运行实现 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
@@ -43,17 +44,29 @@ DocChunk（text / page / type / source_file / table_md / section / chunk_id）
         ↓
 中文递归分块
         ↓
-bge-m3 dense embedding
+合法chunk过滤（legal_chunks）
         ↓
-Milvus Lite
+embedding texts → dense vectors
         ↓
-dense top-k retrieval
+对齐组装rows（chunk metadata + vector）
+        ↓
+按document_id替换写入Milvus Lite
+        ↓
+query embedding + 可信上下文/业务过滤
+        ↓
+dense top-k → SearchHit DTO
+        ↓
+Hit@K / MRR 查询级评测
 ```
 
 目前链路终点是检索结果，还没有生成式回答、引用校验或无证据拒答。
 MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_list.json` 输出。
 
 Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
+
+Day40使用fake embedder和临时Milvus Lite完成`合法chunk → embedding text → vector → row`端到端小样本，并只实现按document删除后重建这一种生命周期策略。重复、换序、修改、删除、ghost检查和部分写入失败后的重跑收敛均有测试；没有运行或修改现有7,451块数据库。策略与后置边界见[Day40向量摄取与文档生命周期决策记录](doc/ingestion_lifecycle.md)。
+
+Day41通过依赖注入建立可使用fake embedder/store测试的Retriever，固定`SearchHit`输出，区分非法输入、空结果、底层系统错误、数据契约错误与召回错误，并以可信workspace和用户可选`source_file`明确过滤边界。真实7,451块数据的6题学习基线为Hit@1 `0.2`、Hit@5 `0.4`、MRR `0.3`；这只是Day42正式评测前的小样本。契约、逐题结果和badcase见[Day41 Retriever与检索基线](doc/retriever_evaluation.md)。
 
 ## 技术栈
 
@@ -96,7 +109,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前基线为`99 passed`，其中40个为Day39标准库检索与独立Gate测试。测试全绿只表示已覆盖的行为符合契约,不替代真实检索评测或事实正确性。
+当前基线为`141 passed`，其中Day41新增29个Retriever、Milvus适配、指标、评测分类与独立Gate测试。`uv run ruff check .`与`uv run mypy app`通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测或事实正确性。
 
 ### 3. 运行可选的 LLM 示例
 
@@ -116,6 +129,9 @@ app/
 │   ├── parse/          # PDF 快速解析与 MinerU 输出适配
 │   ├── chunk.py        # 中文分块与 JSONL 保存
 │   ├── embed.py        # bge-m3 Embedding
+│   ├── ingest.py       # 合法chunk对齐与document级替换摄取
+│   ├── evaluation.py   # 逐题排名与结果状态分类
+│   ├── metrics.py      # Hit@K、RR与MRR
 │   ├── store.py        # Milvus Lite 建库、写入和搜索
 │   └── retriever.py    # 最小 dense retriever
 ├── api/                # 预留，尚未实现
@@ -126,7 +142,7 @@ experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
 doc/                    # 解析器、分块与向量检索决策记录
 data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
-eval/                   # 预留，正式评测尚未建立
+eval/                   # Day41六题学习集与baseline；正式评测待Day42扩展
 ```
 
 当前 `scripts/` 中部分脚本仍使用作者的本地文件名，尚未整理成统一的端到端 CLI。
@@ -137,19 +153,20 @@ eval/                   # 预留，正式评测尚未建立
 - MinerU adapter会按上游`text_level`生成section;若上游把复选框等正文误判为标题,adapter无法自行恢复真实层级
 - 当前`400/60`只是实现基线;Day38单样本中`400/10`与`400/60`输出相同,最优参数待查询级检索评测
 - 表格当前保持原子块,可能超过配置size;完全重复正文缺少真实来源定位时仍有身份歧义
-- 入库脚本尚未实现可靠的幂等更新和删除语义
-- 当前只有 dense retrieval，没有 metadata filters、hybrid search 或 rerank
-- Day39只验证了5条候选的精确COSINE/top-k链路；尚未验证`app/rag`向量与chunk对齐、幂等性或大规模检索质量
+- Day40库函数已验证document级删除后重建，但旧实验脚本尚未统一接入；删除与插入不原子，中途失败可能留下空document或部分rows
+- 当前只有 dense retrieval 和最小metadata过滤，没有hybrid search或rerank；真实Milvus schema尚无workspace_id，workspace隔离目前只有契约/fake证据
+- Day40只用fake embedder、二维向量和临时Milvus验证摄取正确性；没有对7,451块数据执行迁移，也不证明大规模检索质量或生产可靠性
 - 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
-- 尚未建立公开评测集，7,451 个块只是本地入库规模，不是质量指标
+- 当前只有6题学习baseline，尚未建立20～30题正式评测集；7,451个块只是本地入库规模，不是质量指标
+- 旧表格chunk参与embedding的text可能只有“第N页表格”，表体只在table_md，Day41的两个badcase已证明这会导致精确数字召回失败
 - 没有 RAG 答案生成、引用验证、拒答、API、鉴权或多用户隔离
 - 没有可直接使用的 Web 产品界面
 
 ## Roadmap
 
-1. 基于已验证的隔离COSINE/top-k契约，验证`app/rag`向量与chunk对齐,实现幂等更新和删除语义
-2. 完成metadata filters和可测试的Retriever接口
-3. 建立20～30条基础评测集,记录Hit@K、MRR和P95,再决定分块参数
+1. ~~基于已验证的隔离COSINE/top-k契约，验证`app/rag`向量与chunk对齐，实现document级更新和删除收敛语义~~（Day40小样本完成）
+2. ~~完成metadata filters和可测试的Retriever接口~~（Day41完成契约与fake路径；真实workspace schema迁移后置）
+3. 已建立6题学习baseline；扩展到20～30条正式评测集，记录Hit@K、MRR和P95，再决定分块参数
 4. 增加带页码引用和无证据拒答的RAG API
 5. 增加Function Calling、可恢复工作流和人工审核
 6. 增加鉴权、workspace隔离、React界面、Docker和可观测性

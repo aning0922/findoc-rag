@@ -1,9 +1,51 @@
 # pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false, reportUnnecessaryComparison=false
+from collections.abc import Mapping
 from typing import Any
+
 from pymilvus import MilvusClient
 
 DIM = 1024
+
+
+class MilvusSearchStore:
+    """将 MilvusClient 适配为 Retriever 所需的 SearchStore 接口"""
+
+    def __init__(self, client: MilvusClient, collection_name: str) -> None:
+        """绑定 Milvus client 和目标 collection"""
+        self._client = client
+        self._collection_name = collection_name
+
+    def search(
+        self,
+        query_vector: list[float],
+        *,
+        top_k: int,
+        filter_expression: str,
+    ) -> list[Mapping[str, Any]]:
+        """执行 Milvus 搜索 并把 distance/entity 转换成稳定的原始命中格式"""
+        result = self._client.search(
+            collection_name=self._collection_name,
+            data=[query_vector],
+            filter=filter_expression,
+            limit=top_k,
+            output_fields=[
+                "text",
+                "page",
+                "section",
+                "source_file",
+                "chunk_id",
+                "type",
+                "table_md",
+            ],
+        )
+        return [
+            {
+                "score": float(hit["distance"]),
+                **hit["entity"],
+            }
+            for hit in result[0]
+        ]
 
 
 def get_client(db_path: str = "./data/milvus.db") -> MilvusClient:

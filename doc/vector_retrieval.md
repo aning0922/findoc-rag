@@ -2,6 +2,8 @@
 
 > Day39证据更新:2026-08-05 ｜ 实验代码HEAD:`70f6514` ｜ `app/rag` Retriever和Milvus数据未修改
 
+> 后续进度：Day40已在代码提交`46d19f6`中修正COSINE score方向注释，并用临时Milvus完成向量对齐、document级替换和ghost检查；见[Day40向量摄取与文档生命周期决策记录](ingestion_lifecycle.md)。下文“尚未证明”保留为Day39当日边界。
+
 ## 本日范围
 
 Day39先隔离bge-m3和Milvus,用Python标准库独立验证`vector → COSINE → 稳定排序 → top-k`,再用bge-m3做5条候选和1条查询的黑盒对照。本日没有运行7,451块数据,没有连接或修改Milvus,也没有修改`app/rag/store.py`或`app/rag/retriever.py`。
