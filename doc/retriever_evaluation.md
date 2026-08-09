@@ -63,4 +63,34 @@ uv run python -m scripts.evaluate_day41_retrieval
 - 单一 Gate：用户请求尝试传入 `WS-B`，服务端仍使用可信 `WS-A` 并组合 `source_file="已归档.pdf"`；合法过滤未命中时返回空列表。实现和口述均通过。
 - 精确记录的 Day41 C～F 有效用时为 6 小时 26 分 05 秒；A、B 在前一日完成但未计时，不虚构总时长。
 
-Day41 的 P0 为零，达到 L2，可以进入 Day42。Day42 扩展到 20～30 道正式评估题并补足联合闭卷/L3 证据；真实 workspace schema 迁移、表格 embedding 文本修复、完整权限系统和历史实验文件 mypy 债务保留为 P1。
+Day41 的 P0 为零，达到 L2，可以进入 Day42。Day41 结束时曾计划立即扩展到 20～30 题；Day42 的时间盒验收方案随后调整为 12 题 P0、第8周约25题、第11周30～50题并增加 holdout。真实 workspace schema 迁移、表格 embedding 文本修复、完整权限系统和历史实验文件 mypy 债务仍保留为后续项。
+
+## Day42 联合验收追记
+
+> 完成日期：2026-08-08～09 ｜ 起点 HEAD：`6cf9fc7` ｜ Gate：通过
+
+Day42 不重写 Day35～41 实现，只补充可信评测集设计、12题冻结baseline和一个陌生端到端迁移Gate。问题必须从源PDF和原始chunk建立ground truth，不能根据本次Top 5事后选择相关ID；Hit@K和MRR只计算10道可回答题，2道无答案题不冒充拒答准确率。
+
+运行命令：
+
+```bash
+uv run python -m scripts.evaluate_day42_retrieval
+```
+
+冻结范围为`legacy_7451_day41`数据、`BAAI/bge-m3`、`findoc` collection、7,451 rows、`top_k=5`和COSINE。模型加载约`7870.12 ms`，另做一次约`680.04 ms`的warm-up；12个非系统错误样本的探索性P50/P95为`54.44/194.75 ms`，不作为生产性能结论。
+
+| 样本 | 数量或结果 |
+|---|---:|
+| 总题数 | 12 |
+| 可回答题 / 无答案题 | 10 / 2 |
+| Hit@1 | 0.20 |
+| Hit@5 | 0.40 |
+| MRR | 0.27 |
+| normal / recall_error | 6 / 6 |
+| metadata passed / failed | 3 / 1 |
+
+唯一深入分析的Q8询问京东方显示器件业务收入占比。源PDF第19页和相关chunk的`table_md`均包含`81.34%`，但旧chunk的检索`text`只有“第19页表格”，相关ID没有进入Top 5。最早故障层是旧流程的chunk/embedding-text构造，不是parser、filter、ground-truth或Prompt；当天冻结并保留结果，没有调参、修改Retriever或重灌旧collection。
+
+陌生Gate使用两级标题、正文、表格、同document V1/V2、两个workspace/source上下文、5维deterministic embedder和pytest临时Milvus，实际经过adapter、chunk、stable ID、rows对齐、document替换、Retriever、可信过滤和指标。相同版本重跑最终状态不变；正文修改后旧ID消失，未修改表格ID保持；用户提交的`WS-BETA`不能覆盖可信`WS-ALPHA`；三条查询均rank 1，Gate Hit@1、Hit@3和MRR均为1.0。该结果证明小型工程链路迁移正确，不证明真实模型语义质量或生产性能。
+
+最终验证：Day42定向测试`13 passed`，全量pytest`154 passed`，Ruff通过，`mypy app`对17个源文件无问题。两天主动学习约10～11小时。Day42 P0为零，允许进入Day43；Day43/第8周首先检查并修复旧表格embedding text与legacy section数据问题，保留旧baseline并生成版本化对照，不覆盖历史报告。

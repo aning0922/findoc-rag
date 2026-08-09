@@ -2,7 +2,7 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** 解析、分块、向量摄取和可测试 Retriever 已有小样本证据；Day41 已建立 6 题检索基线，当前重点是扩展正式评测并完成联合闭卷验证。
+> **项目状态：建设中。** 解析、分块、向量摄取和可测试 Retriever 已有小样本证据；Day42 已完成 12 题探索性检索基线和陌生端到端 Gate，当前重点是从上游修复旧表格 embedding text，再扩展评测集。
 > API、答案生成、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
 
 ## 项目目标
@@ -29,6 +29,7 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | Milvus Lite | 本地实验已跑通 | 3 份公开年报、7,451 个块已完成本地入库；原始数据和数据库不提交 |
 | 向量摄取与文档生命周期 | 小样本Gate通过 | Day40已验证合法chunk、embedding text、vector和Milvus row一一对应，并实现一种按`document_id`删除后重建的收敛策略；尚无事务或原子替换 |
 | Retriever | Day41 L2 Gate通过 | 已有依赖注入、稳定`SearchHit`、输入/数据错误契约、可信workspace与source_file过滤；真实schema尚无workspace字段，6题baseline不等于正式评测 |
+| 检索评测 | Day42联合Gate通过 | 已有12题探索性baseline、逐题rank与状态、metadata检查、模型加载/检索延迟分离和单一badcase归因；陌生Gate用临时Milvus验证完整迁移链 |
 | RAG API / Agent / Web | 计划中 | 尚无可运行实现 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
@@ -67,6 +68,8 @@ Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE
 Day40使用fake embedder和临时Milvus Lite完成`合法chunk → embedding text → vector → row`端到端小样本，并只实现按document删除后重建这一种生命周期策略。重复、换序、修改、删除、ghost检查和部分写入失败后的重跑收敛均有测试；没有运行或修改现有7,451块数据库。策略与后置边界见[Day40向量摄取与文档生命周期决策记录](doc/ingestion_lifecycle.md)。
 
 Day41通过依赖注入建立可使用fake embedder/store测试的Retriever，固定`SearchHit`输出，区分非法输入、空结果、底层系统错误、数据契约错误与召回错误，并以可信workspace和用户可选`source_file`明确过滤边界。真实7,451块数据的6题学习基线为Hit@1 `0.2`、Hit@5 `0.4`、MRR `0.3`；这只是Day42正式评测前的小样本。契约、逐题结果和badcase见[Day41 Retriever与检索基线](doc/retriever_evaluation.md)。
+
+Day42将冻结问题集扩展到12题（10题可回答、2题无答案），用同一旧7,451块collection得到Hit@1 `0.2`、Hit@5 `0.4`、MRR `0.27`，warm-up后探索性P50/P95为`54.44/194.75 ms`。Q8再次证明旧表格表体只在`table_md`、未进入embedding text会导致精确数字召回失败；当天保留诚实baseline，不调参或重灌。另用手造raw elements、5维deterministic embedder和临时Milvus完成`adapter → chunk → stable ID → document替换 → Retriever/filter → metrics`陌生Gate。Day41/42契约与后续证据见[Retriever契约与检索评测](doc/retriever_evaluation.md)。
 
 ## 技术栈
 
@@ -109,7 +112,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前基线为`141 passed`，其中Day41新增29个Retriever、Milvus适配、指标、评测分类与独立Gate测试。`uv run ruff check .`与`uv run mypy app`通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测或事实正确性。
+当前基线为`154 passed`，其中Day42新增13个评测执行器与陌生端到端Gate测试。`uv run ruff check .`与`uv run mypy app`通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测或事实正确性。
 
 ### 3. 运行可选的 LLM 示例
 
@@ -142,7 +145,7 @@ experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
 doc/                    # 解析器、分块与向量检索决策记录
 data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
-eval/                   # Day41六题学习集与baseline；正式评测待Day42扩展
+eval/                   # Day41六题与Day42十二题探索性检索baseline
 ```
 
 当前 `scripts/` 中部分脚本仍使用作者的本地文件名，尚未整理成统一的端到端 CLI。
@@ -154,11 +157,11 @@ eval/                   # Day41六题学习集与baseline；正式评测待Day42
 - 当前`400/60`只是实现基线;Day38单样本中`400/10`与`400/60`输出相同,最优参数待查询级检索评测
 - 表格当前保持原子块,可能超过配置size;完全重复正文缺少真实来源定位时仍有身份歧义
 - Day40库函数已验证document级删除后重建，但旧实验脚本尚未统一接入；删除与插入不原子，中途失败可能留下空document或部分rows
-- 当前只有 dense retrieval 和最小metadata过滤，没有hybrid search或rerank；真实Milvus schema尚无workspace_id，workspace隔离目前只有契约/fake证据
+- 当前只有 dense retrieval 和最小metadata过滤，没有hybrid search或rerank；旧7,451块Milvus schema尚无workspace_id，workspace隔离目前只有契约与临时Milvus证据
 - Day40只用fake embedder、二维向量和临时Milvus验证摄取正确性；没有对7,451块数据执行迁移，也不证明大规模检索质量或生产可靠性
 - 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
-- 当前只有6题学习baseline，尚未建立20～30题正式评测集；7,451个块只是本地入库规模，不是质量指标
-- 旧表格chunk参与embedding的text可能只有“第N页表格”，表体只在table_md，Day41的两个badcase已证明这会导致精确数字召回失败
+- 当前只有12题探索性baseline；第8周计划扩展到约25题，第11周扩展到30～50题并增加未参与调试的holdout集；7,451个块只是本地入库规模，不是质量指标
+- 旧表格chunk参与embedding的text可能只有“第N页表格”，表体只在table_md；Day41的两个badcase和Day42 Q8已证明这会导致精确数字召回失败，必须在Day43/第8周从上游修复并版本化重建
 - 没有 RAG 答案生成、引用验证、拒答、API、鉴权或多用户隔离
 - 没有可直接使用的 Web 产品界面
 
@@ -166,7 +169,7 @@ eval/                   # Day41六题学习集与baseline；正式评测待Day42
 
 1. ~~基于已验证的隔离COSINE/top-k契约，验证`app/rag`向量与chunk对齐，实现document级更新和删除收敛语义~~（Day40小样本完成）
 2. ~~完成metadata filters和可测试的Retriever接口~~（Day41完成契约与fake路径；真实workspace schema迁移后置）
-3. 已建立6题学习baseline；扩展到20～30条正式评测集，记录Hit@K、MRR和P95，再决定分块参数
+3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate~~（Day42完成）；第8周扩展到约25题，第11周扩展到30～50题并增加holdout集
 4. 增加带页码引用和无证据拒答的RAG API
 5. 增加Function Calling、可恢复工作流和人工审核
 6. 增加鉴权、workspace隔离、React界面、Docker和可观测性
