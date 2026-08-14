@@ -11,7 +11,7 @@ def parse_pdf(
     if backend == "mineru":
         if mineru_out is None:
             raise ValueError("backend='mineru' 时，mineru_out 不能为空")
-        return parse_mineru_output(mineru_out, path)
+        return parse_mineru_output(mineru_out, path).chunks
 
     chunks = text_to_chunks(path)  # 段落块 pymupdf 解析
     chunks += extract_table_chunks(path)  # 表格块 pdfplumber 解析

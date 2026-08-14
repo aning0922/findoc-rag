@@ -10,3 +10,6 @@ class DocChunk(BaseModel):
     table_md: str | None = Field(default=None, description="给LLM用，非表格为None")
     section: str = Field(default="", description="章节")
     chunk_id: str = Field(default="", description="唯一，分块时填 uuid")
+    workspace_id: str = Field(default="", description="workspace id")
+    document_id: str = Field(default="", description="document id")
+    data_version: str = Field(default="", description="data version")

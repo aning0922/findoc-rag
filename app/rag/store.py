@@ -62,6 +62,9 @@ def ensure_collection(client: MilvusClient, name: str, dim: int = DIM) -> None:
 
 
 def ensure_document_collection(client: MilvusClient, name: str, dim: int = DIM) -> None:
+    """
+    创建以字符串 chunk_id 作为主键的集合
+    """
     if not client.has_collection(name):
         client.create_collection(
             collection_name=name,
@@ -80,16 +83,16 @@ def insert_rows(client: MilvusClient, name: str, rows: list[dict[str, Any]]) -> 
     return len(rows)
 
 
-def count_rows(client: MilvusClient, name: str) -> int:
+def count_rows(client: MilvusClient, collection_name: str) -> int:
     """
     统计行数
     Args:
         client: Milvus客户端
-        name: 集合名称
+        collection_name: 目标 collection 名称
     Returns:
         int: 行数
     """
-    res = client.query(collection_name=name, filter="", output_fields=["count(*)"])
+    res = client.query(collection_name=collection_name, filter="", output_fields=["count(*)"])
     return int(res[0]["count(*)"])
 
 

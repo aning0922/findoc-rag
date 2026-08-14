@@ -29,11 +29,26 @@ COLLECTION_NAME = "day42_end_to_end_gate"
 A_SOURCE_FILE = "gate/澄海精密2026简报.pdf"
 A_SECTION = "澄海精密2026年运营简报/一、交付与质量"
 
+# MinerU 输出的原始表体；用于验证 table_md 原样保存。
 A_TABLE_BODY = (
-    "| 型号 | 低温循环次数 | 结论 |\n"
-    "|---|---:|---|\n"
-    "| BJ-7 | 360次 | 通过 |\n"
-    "| BJ-9 | 240次 | 待复核 |"
+    "<table>"
+    "<tr><th>型号</th><th>低温循环次数</th><th>结论</th></tr>"
+    "<tr><td>BJ-7</td><td>360次</td><td>通过</td></tr>"
+    "<tr><td>BJ-9</td><td>240次</td><td>待复核</td></tr>"
+    "</table>"
+)
+
+# 【建议】表格进入 embedding 前的可检索文本；不含 HTML 或 Markdown 装饰。
+A_TABLE_SEARCH_TEXT = (
+    "蓝晶模组低温验证表\n型号 | 低温循环次数 | 结论\nBJ-7 | 360次 | 通过\nBJ-9 | 240次 | 待复核"
+)
+
+# B 文档由 MinerU 输出的原始 HTML 表体。
+B_TABLE_BODY = (
+    "<table>"
+    "<tr><th>型号</th><th>校准周期</th><th>状态</th></tr>"
+    "<tr><td>YS-3</td><td>45天</td><td>正常</td></tr>"
+    "</table>"
 )
 
 B_SOURCE_FILE = "gate/北辰精密2026简报.pdf"
@@ -46,29 +61,24 @@ a_v1_elements: list[dict[str, Any]] = [
         "type": "text",
         "text": "澄海精密2026年运营简报",
         "text_level": 1,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "text",
         "text": "一、交付与质量",
         "text_level": 2,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "text",
         "text": ("海岬一号产线位于宁波，负责蓝晶模组的试制。2026年第一季度计划交付120套。"),
         "text_level": None,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "table",
         "table_caption": ["蓝晶模组低温验证表"],
-        "table_body": (
-            "| 型号 | 低温循环次数 | 结论 |\n"
-            "|---|---:|---|\n"
-            "| BJ-7 | 360次 | 通过 |\n"
-            "| BJ-9 | 240次 | 待复核 |"
-        ),
+        "table_body": A_TABLE_BODY,
         "page_idx": 1,
     },
 ]
@@ -78,29 +88,24 @@ a_v2_elements: list[dict[str, Any]] = [
         "type": "text",
         "text": "澄海精密2026年运营简报",
         "text_level": 1,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "text",
         "text": "一、交付与质量",
         "text_level": 2,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "text",
         "text": ("海岬一号产线位于宁波，负责蓝晶模组的试制。2026年第一季度实际交付128套。"),
         "text_level": None,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "table",
         "table_caption": ["蓝晶模组低温验证表"],
-        "table_body": (
-            "| 型号 | 低温循环次数 | 结论 |\n"
-            "|---|---:|---|\n"
-            "| BJ-7 | 360次 | 通过 |\n"
-            "| BJ-9 | 240次 | 待复核 |"
-        ),
+        "table_body": A_TABLE_BODY,
         "page_idx": 1,
     },
 ]
@@ -111,24 +116,24 @@ b_v1_elements: list[dict[str, Any]] = [
         "type": "text",
         "text": "北辰精密2026年运营简报",
         "text_level": 1,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "text",
         "text": "一、制造进展",
         "text_level": 2,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "text",
         "text": ("霁光三号产线位于合肥，负责银杉组件的生产。2026年第一季度实际交付999套。"),
         "text_level": None,
-        "page_idx": 0,
+        "page_idx": 1,
     },
     {
         "type": "table",
         "table_caption": ["银杉组件校准表"],
-        "table_body": ("| 型号 | 校准周期 | 状态 |\n|---|---:|---|\n| YS-3 | 45天 | 正常 |"),
+        "table_body": B_TABLE_BODY,
         "page_idx": 1,
     },
 ]
@@ -182,9 +187,19 @@ def prepare_rows(
     source_file: str,
     workspace_id: str,
 ) -> tuple[list[DocChunk], list[DocChunk], list[dict[str, Any]]]:
-    """执行 adapter、chunk、可信 metadata 注入和向量对齐，返回 chunks 与 rows"""
+    """
+    执行 adapter、chunk、可信 metadata 注入和向量对齐，返回 chunks 与 rows
+
+    Args:
+        content_dir: MinerU 输入的 content-list 文件所在目录。
+        source_file: 源文件路径。
+        workspace_id: 服务端附加的可信 workspace。
+
+    Returns:
+        tuple[list[DocChunk], list[DocChunk], list[dict[str, Any]]]: 块、分块和行列表。
+    """
     # 1. parse_mineru_output
-    blocks = parse_mineru_output(str(content_dir), source_file)
+    blocks = parse_mineru_output(str(content_dir), source_file).chunks
     # 2. chunk_docment
     chunks = chunk_docment(blocks)
     # 3. model_dump，并由服务端添加 workspace_id
@@ -280,14 +295,14 @@ def test_day42_unknown_end_to_end_gate(tmp_path: Path) -> None:
             a_v1_dir, source_file=A_SOURCE_FILE, workspace_id="WS-ALPHA"
         )
         assert [block.type for block in a_v1_blocks] == ["title", "title", "paragraph", "table"]
-        assert [block.page for block in a_v1_blocks] == [1, 1, 1, 2]
+        assert [block.page for block in a_v1_blocks] == [2, 2, 2, 2]
         assert a_v1_blocks[0].section == "澄海精密2026年运营简报"
         assert a_v1_blocks[1].section == A_SECTION
         assert a_v1_blocks[2].section == A_SECTION
         assert a_v1_blocks[3].section == A_SECTION
         assert all(block.source_file == A_SOURCE_FILE for block in a_v1_blocks)
         adapter_table = a_v1_blocks[3]
-        assert adapter_table.text == "蓝晶模组低温验证表\n" + A_TABLE_BODY
+        assert adapter_table.text == A_TABLE_SEARCH_TEXT
         assert adapter_table.table_md == A_TABLE_BODY
         assert "BJ-7" in adapter_table.text
         assert "360次" in adapter_table.text
@@ -297,14 +312,14 @@ def test_day42_unknown_end_to_end_gate(tmp_path: Path) -> None:
         paragraph_chunk = a_v1_chunks[0]
         table_chunk = a_v1_chunks[1]
 
-        assert paragraph_chunk.page == 1
+        assert paragraph_chunk.page == 2
         assert paragraph_chunk.section == A_SECTION
         assert paragraph_chunk.source_file == A_SOURCE_FILE
 
         assert table_chunk.page == 2
         assert table_chunk.section == A_SECTION
         assert table_chunk.source_file == A_SOURCE_FILE
-        assert table_chunk.text == "蓝晶模组低温验证表\n" + A_TABLE_BODY
+        assert table_chunk.text == A_TABLE_SEARCH_TEXT
         assert table_chunk.table_md == A_TABLE_BODY
 
         assert paragraph_chunk.chunk_id
@@ -538,7 +553,7 @@ def test_day42_unknown_end_to_end_gate(tmp_path: Path) -> None:
         g1_first_hit = g1_hits[0]
 
         assert g1_first_hit.text == new_paragraph_chunk.text
-        assert g1_first_hit.page == 1
+        assert g1_first_hit.page == 2
         assert g1_first_hit.source_file == A_SOURCE_FILE
         assert g1_first_hit.type == "paragraph"
         assert g1_first_hit.section == A_SECTION
@@ -701,7 +716,7 @@ def test_day42_unknown_end_to_end_gate(tmp_path: Path) -> None:
         assert g3_first_hit.chunk_id == new_paragraph_chunk.chunk_id
         assert g3_first_hit.text == new_paragraph_chunk.text
         assert g3_first_hit.type == "paragraph"
-        assert g3_first_hit.page == 1
+        assert g3_first_hit.page == 2
         assert g3_first_hit.source_file == A_SOURCE_FILE
         assert g3_first_hit.section == A_SECTION
         assert g3_first_hit.table_md is None
