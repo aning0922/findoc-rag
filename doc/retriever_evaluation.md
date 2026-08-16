@@ -1,4 +1,4 @@
-# Day41 Retriever 契约与六题检索基线
+# Retriever 契约与 Day41-43 检索评测
 
 > 完成日期：2026-08-07 ｜ 起点 HEAD：`46d19f6` ｜ Gate：通过（L2）
 
@@ -94,3 +94,25 @@ uv run python -m scripts.evaluate_day42_retrieval
 陌生Gate使用两级标题、正文、表格、同document V1/V2、两个workspace/source上下文、5维deterministic embedder和pytest临时Milvus，实际经过adapter、chunk、stable ID、rows对齐、document替换、Retriever、可信过滤和指标。相同版本重跑最终状态不变；正文修改后旧ID消失，未修改表格ID保持；用户提交的`WS-BETA`不能覆盖可信`WS-ALPHA`；三条查询均rank 1，Gate Hit@1、Hit@3和MRR均为1.0。该结果证明小型工程链路迁移正确，不证明真实模型语义质量或生产性能。
 
 最终验证：Day42定向测试`13 passed`，全量pytest`154 passed`，Ruff通过，`mypy app`对17个源文件无问题。两天主动学习约10～11小时。Day42 P0为零，允许进入Day43；Day43/第8周首先检查并修复旧表格embedding text与legacy section数据问题，保留旧baseline并生成版本化对照，不覆盖历史报告。
+
+## Day43 真实数据v2与同12题对照追记
+
+> 完成日期：2026-08-14 ｜ 数据版本：`day43_data_v2` ｜ 工程P0：完成
+
+Day43没有覆盖`eval/day42_baseline.json`、旧JSONL或7,451行`findoc`。生产归一化明确处理`text/table/header/footer/page_number/image`，未知类型携带raw index/type失败；页眉、页脚和页码跳过且不污染section，空正文与空表壳按原因统计。表格用于embedding的`text`由标题和可见单元格组成，原始HTML原样保存在`table_md`，两个消费者职责分离。
+
+三份真实MinerU输入共8,750个raw element，smoke均通过；版本化JSONL最终为成都华微2,436行、贵州茅台1,504行、京东方1,329行，共5,269行。固定workspace为`demo-financial-reports`，三份文档使用彼此不同的稳定`document_id`，全局`chunk_id`唯一；同输入重建SHA-256收敛。`findoc_day43_v2`为5,269行，旧`findoc`前后均为7,451行，manifest已原子发布并重新验证。
+
+冻结12题保持10题可回答、2题无答案，将13个legacy证据ID迁移到v2稳定ID；问题语义、页码、类型与source metadata不变。legacy/v2使用同一`BAAI/bge-m3`、1024维dense vector、COSINE、`top_k=5`、`Retriever`和评测函数。旧collection没有workspace字段，因此仅在实验层使用`LegacyComparisonStore`验证并移除固定workspace条件，仍保留`source_file`条件；v2执行真实workspace过滤。
+
+| 指标 | legacy 7,451 | v2 5,269 | v2 - legacy |
+|---|---:|---:|---:|
+| Hit@1 | 0.20 | 0.20 | 0.00 |
+| Hit@5 | 0.40 | 0.50 | +0.10 |
+| MRR | 0.27 | 0.3333 | +0.0633 |
+| 探索性P50 | 58.79 ms | 68.93 ms | +10.14 ms |
+| 探索性P95 | 91.25 ms | 70.81 ms | -20.44 ms |
+
+12题中Q6由未命中变为rank 2，Q9由rank 5变为rank 3，其余10题排名状态不变，没有题目退化。唯一深入分析的Q8在v2仍未命中人工相关表格，因此不能宣称表格召回已解决；但legacy前四个表格候选都只有相同年报标题且分数几乎相同，v2候选已经包含各自真实表头、表体和section，证明最早的embedding-text结构缺陷已消除。当天不调整chunk、模型、top_k或阈值，也不覆盖结果。
+
+原始产物为`eval/day43_legacy_comparison.json`、`eval/day43_v2_comparison.json`和`eval/day43_legacy_v2_comparison.json`。最终全量pytest为`184 passed`，Ruff通过，`mypy app` 17个源文件和8个Day43实验模块通过；两个collection行数未变化，评测无`system_error`。后续项为复杂HTML span展开、命名整理和未召回题的受控检索诊断，不阻塞进入Day44可信RAG控制链。

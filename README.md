@@ -2,7 +2,7 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** 解析、分块、向量摄取和可测试 Retriever 已有小样本证据；Day42 已完成 12 题探索性检索基线和陌生端到端 Gate，当前重点是从上游修复旧表格 embedding text，再扩展评测集。
+> **项目状态：建设中。** Day43 已完成生产归一化、表格 embedding text/section 修复、版本化 v2 构建以及同12题新旧对照；当前进入可信 RAG 控制链，先用 fake 验证职责与错误边界。
 > API、答案生成、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
 
 ## 项目目标
@@ -23,13 +23,13 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 |---|---|---|
 | LLM 调用示例 | 可运行 | DeepSeek OpenAI 兼容接口；包含同步、流式和异步并发示例 |
 | PDF 快速解析 | 原型可运行 | PyMuPDF 提取正文，pdfplumber 提取表格 |
-| MinerU 输出适配 | 契约测试通过 | 多级标题、section、顺序、表格正文、页码与异常输入已有成功/失败测试；仍依赖上游`content_list.json`质量 |
+| MinerU 输出适配 | Day43真实数据smoke通过 | 已知`text/table/header/footer/page_number/image`有显式保留/跳过/报错策略；表格检索`text`含标题、表头和表体，`table_md`保留原始HTML |
 | 中文分块 | 第6周理解Gate通过 | 中文分隔符+token计数、metadata复制、表格双表示与稳定ID已有测试；参数最优性待查询级评测 |
 | Embedding | 本地实验已跑通 | bge-m3，dense vector维度为1024；Day39用5条候选和1条查询完成脱离Milvus的观察性黑盒对照 |
-| Milvus Lite | 本地实验已跑通 | 3 份公开年报、7,451 个块已完成本地入库；原始数据和数据库不提交 |
+| Milvus Lite | legacy/v2并存 | 旧`findoc`保留7,451行；Day43新增`findoc_day43_v2` 5,269行，使用固定demo workspace和三份不同的稳定document_id；本地数据和数据库不提交 |
 | 向量摄取与文档生命周期 | 小样本Gate通过 | Day40已验证合法chunk、embedding text、vector和Milvus row一一对应，并实现一种按`document_id`删除后重建的收敛策略；尚无事务或原子替换 |
-| Retriever | Day41 L2 Gate通过 | 已有依赖注入、稳定`SearchHit`、输入/数据错误契约、可信workspace与source_file过滤；真实schema尚无workspace字段，6题baseline不等于正式评测 |
-| 检索评测 | Day42联合Gate通过 | 已有12题探索性baseline、逐题rank与状态、metadata检查、模型加载/检索延迟分离和单一badcase归因；陌生Gate用临时Milvus验证完整迁移链 |
+| Retriever | Day43同配置对照通过 | 依赖注入、稳定`SearchHit`和可信workspace/source_file过滤保持不变；v2真实schema带workspace，legacy仅由实验兼容store移除经验证的workspace条件 |
+| 检索评测 | Day43新旧对照完成 | 12题/13个证据ID迁移到v2；同bge-m3、COSINE、top_k=5和Retriever下，Hit@1 0.20→0.20、Hit@5 0.40→0.50、MRR 0.27→0.3333；逐题原始结果独立保留 |
 | RAG API / Agent / Web | 计划中 | 尚无可运行实现 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
@@ -46,6 +46,8 @@ DocChunk（text / page / type / source_file / table_md / section / chunk_id）
 中文递归分块
         ↓
 合法chunk过滤（legal_chunks）
+        ↓
+稳定workspace/document/chunk身份 + 版本化JSONL/manifest
         ↓
 embedding texts → dense vectors
         ↓
@@ -70,6 +72,8 @@ Day40使用fake embedder和临时Milvus Lite完成`合法chunk → embedding tex
 Day41通过依赖注入建立可使用fake embedder/store测试的Retriever，固定`SearchHit`输出，区分非法输入、空结果、底层系统错误、数据契约错误与召回错误，并以可信workspace和用户可选`source_file`明确过滤边界。真实7,451块数据的6题学习基线为Hit@1 `0.2`、Hit@5 `0.4`、MRR `0.3`；这只是Day42正式评测前的小样本。契约、逐题结果和badcase见[Day41 Retriever与检索基线](doc/retriever_evaluation.md)。
 
 Day42将冻结问题集扩展到12题（10题可回答、2题无答案），用同一旧7,451块collection得到Hit@1 `0.2`、Hit@5 `0.4`、MRR `0.27`，warm-up后探索性P50/P95为`54.44/194.75 ms`。Q8再次证明旧表格表体只在`table_md`、未进入embedding text会导致精确数字召回失败；当天保留诚实baseline，不调参或重灌。另用手造raw elements、5维deterministic embedder和临时Milvus完成`adapter → chunk → stable ID → document替换 → Retriever/filter → metrics`陌生Gate。Day41/42契约与后续证据见[Retriever契约与检索评测](doc/retriever_evaluation.md)。
+
+Day43保留旧7,451行`findoc`和Day42 baseline，新增5,269行`findoc_day43_v2`、三份版本化JSONL与manifest。真实MinerU输入共8,750个元素，已显式处理页眉、页脚、页码、图片、空正文、空表壳和未知类型；表格检索`text`不再只有文档名或“第N页表格”，而是包含可见表头/表体，原始HTML继续保存在`table_md`。冻结12题迁移到13个v2稳定证据ID后，以同一模型、COSINE、`top_k=5`、Retriever和评测函数重跑，Hit@1保持`0.20`，Hit@5为`0.50`，MRR为`0.3333`；没有根据结果调参。Q8仍未召回目标表格，但v2候选已包含真实表体，说明上游结构缺陷消除不等于当前dense配置解决所有排序问题。
 
 ## 技术栈
 
@@ -112,7 +116,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前基线为`154 passed`，其中Day42新增13个评测执行器与陌生端到端Gate测试。`uv run ruff check .`与`uv run mypy app`通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测或事实正确性。
+当前基线为`184 passed`。`uv run ruff check app experiments tests scripts`、`uv run mypy app`以及8个Day43实验模块的mypy检查通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测或事实正确性。
 
 ### 3. 运行可选的 LLM 示例
 
@@ -145,7 +149,7 @@ experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
 doc/                    # 解析器、分块与向量检索决策记录
 data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
-eval/                   # Day41六题与Day42十二题探索性检索baseline
+eval/                   # Day41/42 baseline与Day43 legacy/v2逐题对照结果
 ```
 
 当前 `scripts/` 中部分脚本仍使用作者的本地文件名，尚未整理成统一的端到端 CLI。
@@ -157,11 +161,11 @@ eval/                   # Day41六题与Day42十二题探索性检索baseline
 - 当前`400/60`只是实现基线;Day38单样本中`400/10`与`400/60`输出相同,最优参数待查询级检索评测
 - 表格当前保持原子块,可能超过配置size;完全重复正文缺少真实来源定位时仍有身份歧义
 - Day40库函数已验证document级删除后重建，但旧实验脚本尚未统一接入；删除与插入不原子，中途失败可能留下空document或部分rows
-- 当前只有 dense retrieval 和最小metadata过滤，没有hybrid search或rerank；旧7,451块Milvus schema尚无workspace_id，workspace隔离目前只有契约与临时Milvus证据
-- Day40只用fake embedder、二维向量和临时Milvus验证摄取正确性；没有对7,451块数据执行迁移，也不证明大规模检索质量或生产可靠性
+- 当前只有 dense retrieval 和最小metadata过滤，没有hybrid search或rerank；v2真实schema有固定demo workspace，但旧7,451行schema仍无workspace_id，也没有完整认证或多租户系统
+- Day43已用真实bge-m3构建5,269行v2并验证document级收敛；删除与插入仍非事务原子操作，不证明生产可靠性
 - 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
-- 当前只有12题探索性baseline；第8周计划扩展到约25题，第11周扩展到30～50题并增加未参与调试的holdout集；7,451个块只是本地入库规模，不是质量指标
-- 旧表格chunk参与embedding的text可能只有“第N页表格”，表体只在table_md；Day41的两个badcase和Day42 Q8已证明这会导致精确数字召回失败，必须在Day43/第8周从上游修复并版本化重建
+- 当前仍只有12题探索性对照；第8周P0扩展到总20题，第11周扩展到30～50题并增加未参与调试的holdout集；7,451/5,269行都只是本地规模，不是质量指标
+- legacy表格embedding text退化缺陷作为历史事实保留；v2已让标题、表头和表体进入检索text，但Q3/Q4/Q7/Q8/Q11仍未进入Top 5，后续必须另做受控检索诊断
 - 没有 RAG 答案生成、引用验证、拒答、API、鉴权或多用户隔离
 - 没有可直接使用的 Web 产品界面
 
@@ -169,10 +173,11 @@ eval/                   # Day41六题与Day42十二题探索性检索baseline
 
 1. ~~基于已验证的隔离COSINE/top-k契约，验证`app/rag`向量与chunk对齐，实现document级更新和删除收敛语义~~（Day40小样本完成）
 2. ~~完成metadata filters和可测试的Retriever接口~~（Day41完成契约与fake路径；真实workspace schema迁移后置）
-3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate~~（Day42完成）；第8周扩展到约25题，第11周扩展到30～50题并增加holdout集
-4. 增加带页码引用和无证据拒答的RAG API
-5. 增加Function Calling、可恢复工作流和人工审核
-6. 增加鉴权、workspace隔离、React界面、Docker和可观测性
+3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate~~（Day42完成）；第8周扩展到总20题P0、25题目标，第11周扩展到30～50题并增加holdout集
+4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
+5. 增加带页码引用和无证据拒答的RAG API
+6. 增加Function Calling、可恢复工作流和人工审核
+7. 增加鉴权、workspace隔离、React界面、Docker和可观测性
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
 
