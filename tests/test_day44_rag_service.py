@@ -1,10 +1,10 @@
 import pytest
 
-from app.rag.retriever import SearchHit, TrustedContext, SearchFilters
+from app.rag.retriever import Retriever, SearchHit, TrustedContext, SearchFilters
 from app.rag.service import NoEvidenceError, RAGService, RAGResult, RetrievalError, GenerationError
 
 
-class FakeRetriever:
+class FakeRetriever(Retriever):
     """模拟现有 Retriever 边界，返回预设结果或异常，并记录调用参数。"""
 
     def __init__(self, hits: list[SearchHit], error: Exception | None = None) -> None:
@@ -106,6 +106,39 @@ def test_happy_path_passes_retrieved_evidence_to_llm() -> None:
     assert len(fake_llm.prompts) == 1
     assert query in fake_llm.prompts[0]
     assert search_hits[0].text in fake_llm.prompts[0]
+
+
+def test_switching_trusted_context_is_forwarded_to_retriever() -> None:
+    """验证同一控制层的两次请求会分别传递服务端可信上下文；
+    无输入和返回值，若 Retriever 收到的 workspace 顺序不正确则断言失败。
+    """
+    search_hits = [
+        SearchHit(
+            score=0.9,
+            chunk_id="C-REV",
+            text="2025年营业收入为100亿元",
+            page=7,
+            source_file="demo.pdf",
+            type="paragraph",
+            section="主要财务数据",
+            table_md=None,
+        ),
+    ]
+    query = "营业收入是多少？"
+    context_a = TrustedContext(workspace_id="W-SA")
+    context_b = TrustedContext(workspace_id="W-SB")
+    search_filters = SearchFilters(source_file="demo.pdf")
+    fake_retriever = FakeRetriever(hits=search_hits)
+    fake_llm = FakeLLMClient(response="营业收入为100亿元")
+    service = RAGService(fake_retriever, fake_llm)
+
+    service.answer(query, context=context_a, filters=search_filters)
+    service.answer(query, context=context_b, filters=search_filters)
+
+    assert [call[1] for call in fake_retriever.calls] == [context_a, context_b]
+    assert len(fake_llm.prompts) == 2
+    assert "W-SA" not in fake_llm.prompts[0]
+    assert "W-SB" not in fake_llm.prompts[1]
 
 
 def test_retrieval_failure_skips_llm() -> None:
