@@ -94,18 +94,23 @@ def test_happy_path_passes_retrieved_evidence_to_llm() -> None:
     search_filters: SearchFilters = SearchFilters(source_file="demo.pdf")
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(search_hits)
-    fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元")
-    service: RAGService = RAGService(fake_retriever, fake_llm)
+    fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元。[1]")
+    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
     rag_result: RAGResult = service.answer(
         query, context=trusted_context, top_k=top_k, filters=search_filters
     )
     assert isinstance(rag_result, RAGResult)
-    assert rag_result.content == "营业收入为100亿元"
+    assert rag_result.content == "营业收入为100亿元。[1]"
     assert len(fake_retriever.calls) == 1
     assert fake_retriever.calls[0] == (query, trusted_context, top_k, search_filters)
     assert len(fake_llm.prompts) == 1
     assert query in fake_llm.prompts[0]
     assert search_hits[0].text in fake_llm.prompts[0]
+    assert len(rag_result.citations) == 1
+    assert rag_result.citations[0].number == 1
+    assert rag_result.citations[0].source_file == "demo.pdf"
+    assert rag_result.citations[0].page == 7
+    assert rag_result.citations[0].chunk_id == "C-REV"
 
 
 def test_switching_trusted_context_is_forwarded_to_retriever() -> None:
@@ -129,8 +134,8 @@ def test_switching_trusted_context_is_forwarded_to_retriever() -> None:
     context_b = TrustedContext(workspace_id="W-SB")
     search_filters = SearchFilters(source_file="demo.pdf")
     fake_retriever = FakeRetriever(hits=search_hits)
-    fake_llm = FakeLLMClient(response="营业收入为100亿元")
-    service = RAGService(fake_retriever, fake_llm)
+    fake_llm = FakeLLMClient(response="营业收入为100亿元。[1]")
+    service = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
 
     service.answer(query, context=context_a, filters=search_filters)
     service.answer(query, context=context_b, filters=search_filters)
@@ -149,7 +154,7 @@ def test_retrieval_failure_skips_llm() -> None:
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(hits=[], error=ConnectionError("offLine"))
     fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元")
-    service: RAGService = RAGService(fake_retriever, fake_llm)
+    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
 
     with pytest.raises(RetrievalError) as exc_info:
         service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
@@ -167,7 +172,7 @@ def test_empty_evidence_skips_llm() -> None:
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(hits=[])
     fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元")
-    service: RAGService = RAGService(fake_retriever, fake_llm)
+    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
 
     with pytest.raises(NoEvidenceError):
         service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
@@ -198,7 +203,7 @@ def test_generation_timeout_is_generation_error() -> None:
     fake_llm: FakeLLMClient = FakeLLMClient(
         response="营业收入为100亿元", error=TimeoutError("timeout")
     )
-    service: RAGService = RAGService(fake_retriever, fake_llm)
+    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
 
     with pytest.raises(GenerationError) as exc_info:
         service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
@@ -235,8 +240,8 @@ def test_changing_evidence_changes_llm_prompt() -> None:
     search_filters: SearchFilters = SearchFilters(source_file="demo.pdf")
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(hits=[search_hit_1])
-    fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元")
-    service: RAGService = RAGService(fake_retriever, fake_llm)
+    fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元。[1]")
+    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
     service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
     prompt1 = fake_llm.prompts[0]
 
