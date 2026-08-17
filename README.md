@@ -2,8 +2,8 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** Day43 已完成生产归一化、表格 embedding text/section 修复、版本化 v2 构建以及同12题新旧对照；当前进入可信 RAG 控制链，先用 fake 验证职责与错误边界。
-> API、答案生成、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
+> **项目状态：建设中。** Day44 已完成可测试的最小非流式 RAG 控制层，复用现有 Retriever，并用 fake 验证生成前空证据闸门、prompt 输入与检索/生成失败归属。
+> 真实 LLM 接入、引用校验、正式拒答、RAG API、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
 
 ## 项目目标
 
@@ -30,7 +30,8 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | 向量摄取与文档生命周期 | 小样本Gate通过 | Day40已验证合法chunk、embedding text、vector和Milvus row一一对应，并实现一种按`document_id`删除后重建的收敛策略；尚无事务或原子替换 |
 | Retriever | Day43同配置对照通过 | 依赖注入、稳定`SearchHit`和可信workspace/source_file过滤保持不变；v2真实schema带workspace，legacy仅由实验兼容store移除经验证的workspace条件 |
 | 检索评测 | Day43新旧对照完成 | 12题/13个证据ID迁移到v2；同bge-m3、COSINE、top_k=5和Retriever下，Hit@1 0.20→0.20、Hit@5 0.40→0.50、MRR 0.27→0.3333；逐题原始结果独立保留 |
-| RAG API / Agent / Web | 计划中 | 尚无可运行实现 |
+| RAG 控制层 | Day44 fake链通过 | `retrieve → 空证据evidence gate → 最小prompt → LLMClient → RAGResult`；检索失败、空证据和生成超时有独立异常与fake调用次数证据 |
+| RAG API / Agent / Web | 计划中 | 尚无真实模型全链或可运行网络入口 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
 
@@ -58,11 +59,15 @@ embedding texts → dense vectors
 query embedding + 可信上下文/业务过滤
         ↓
 dense top-k → SearchHit DTO
-        ↓
-Hit@K / MRR 查询级评测
+        ├─离线评测分支→ Hit@K / MRR
+        └─Day44控制分支→ 最小空证据evidence gate
+                              ↓
+                    问题 + SearchHit.text → 最小prompt
+                              ↓
+                    LLMClient（仅fake验证）→ 未引用校验的RAGResult
 ```
 
-目前链路终点是检索结果，还没有生成式回答、引用校验或无证据拒答。
+目前生产数据链到检索结果已有真实本地证据；Day44后续控制链仅用fake验证调用顺序和错误边界，还没有真实模型问答、引用校验或正式无证据拒答。
 MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_list.json` 输出。
 
 Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
@@ -74,6 +79,8 @@ Day41通过依赖注入建立可使用fake embedder/store测试的Retriever，�
 Day42将冻结问题集扩展到12题（10题可回答、2题无答案），用同一旧7,451块collection得到Hit@1 `0.2`、Hit@5 `0.4`、MRR `0.27`，warm-up后探索性P50/P95为`54.44/194.75 ms`。Q8再次证明旧表格表体只在`table_md`、未进入embedding text会导致精确数字召回失败；当天保留诚实baseline，不调参或重灌。另用手造raw elements、5维deterministic embedder和临时Milvus完成`adapter → chunk → stable ID → document替换 → Retriever/filter → metrics`陌生Gate。Day41/42契约与后续证据见[Retriever契约与检索评测](doc/retriever_evaluation.md)。
 
 Day43保留旧7,451行`findoc`和Day42 baseline，新增5,269行`findoc_day43_v2`、三份版本化JSONL与manifest。真实MinerU输入共8,750个元素，已显式处理页眉、页脚、页码、图片、空正文、空表壳和未知类型；表格检索`text`不再只有文档名或“第N页表格”，而是包含可见表头/表体，原始HTML继续保存在`table_md`。冻结12题迁移到13个v2稳定证据ID后，以同一模型、COSINE、`top_k=5`、Retriever和评测函数重跑，Hit@1保持`0.20`，Hit@5为`0.50`，MRR为`0.3333`；没有根据结果调参。Q8仍未召回目标表格，但v2候选已包含真实表体，说明上游结构缺陷消除不等于当前dense配置解决所有排序问题。
+
+Day44在不重建Retriever或workspace过滤的前提下，新增供应商无关的最小`LLMClient` Protocol和非流式`RAGService`。fake Retriever/LLM记录调用参数、次数和prompt，自动证明检索失败或空证据时LLM不被调用，生成超时保留原始cause并归入generation失败，切换`TrustedContext`不会黏住上一次workspace且workspace ID不进入LLM prompt。当天只做空证据检查和最小prompt，正式Context Builder、引用校验和拒答后置。
 
 ## 技术栈
 
@@ -116,7 +123,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前基线为`184 passed`。`uv run ruff check app experiments tests scripts`、`uv run mypy app`以及8个Day43实验模块的mypy检查通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测或事实正确性。
+当前基线为`190 passed`。`uv run ruff check app experiments tests scripts`、`uv run mypy app`、Day44测试文件以及8个Day43实验模块的mypy检查通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
 
 ### 3. 运行可选的 LLM 示例
 
@@ -140,7 +147,8 @@ app/
 │   ├── evaluation.py   # 逐题排名与结果状态分类
 │   ├── metrics.py      # Hit@K、RR与MRR
 │   ├── store.py        # Milvus Lite 建库、写入和搜索
-│   └── retriever.py    # 最小 dense retriever
+│   ├── retriever.py    # 最小 dense retriever
+│   └── service.py      # Day44最小非流式RAG控制层与LLM边界
 ├── api/                # 预留，尚未实现
 ├── gateway/            # 预留，尚未实现
 └── agent/              # 预留，尚未实现
@@ -149,7 +157,7 @@ experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
 doc/                    # 解析器、分块与向量检索决策记录
 data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
-eval/                   # Day41/42 baseline与Day43 legacy/v2逐题对照结果
+eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评测题草稿
 ```
 
 当前 `scripts/` 中部分脚本仍使用作者的本地文件名，尚未整理成统一的端到端 CLI。
@@ -166,7 +174,7 @@ eval/                   # Day41/42 baseline与Day43 legacy/v2逐题对照结果
 - 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
 - 当前仍只有12题探索性对照；第8周P0扩展到总20题，第11周扩展到30～50题并增加未参与调试的holdout集；7,451/5,269行都只是本地规模，不是质量指标
 - legacy表格embedding text退化缺陷作为历史事实保留；v2已让标题、表头和表体进入检索text，但Q3/Q4/Q7/Q8/Q11仍未进入Top 5，后续必须另做受控检索诊断
-- 没有 RAG 答案生成、引用验证、拒答、API、鉴权或多用户隔离
+- 当前只有fake LLM验证的最小非流式生成控制链；没有真实模型全链、引用验证、正式拒答、RAG API、鉴权或多用户隔离
 - 没有可直接使用的 Web 产品界面
 
 ## Roadmap
@@ -175,9 +183,10 @@ eval/                   # Day41/42 baseline与Day43 legacy/v2逐题对照结果
 2. ~~完成metadata filters和可测试的Retriever接口~~（Day41完成契约与fake路径；真实workspace schema迁移后置）
 3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate~~（Day42完成）；第8周扩展到总20题P0、25题目标，第11周扩展到30～50题并增加holdout集
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
-5. 增加带页码引用和无证据拒答的RAG API
-6. 增加Function Calling、可恢复工作流和人工审核
-7. 增加鉴权、workspace隔离、React界面、Docker和可观测性
+5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
+6. 增加稳定引用映射、引用校验、正式拒答与RAG API
+7. 增加Function Calling、可恢复工作流和人工审核
+8. 增加鉴权、workspace隔离、React界面、Docker和可观测性
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
 
@@ -186,4 +195,4 @@ eval/                   # Day41/42 baseline与Day43 legacy/v2逐题对照结果
 - 仓库不包含年报 PDF、解析产物、向量数据库、模型文件或 API 密钥
 - 本地实验仅使用公开披露文件，原始文件的使用应遵守其来源条款
 - 本项目用于工程学习和信息检索研究，不构成投资建议
-- 生成式回答和自动审核尚未实现；未来版本的输出仍需人工核验
+- 真实模型生成式回答、引用校验和自动审核尚未实现；未来版本的输出仍需人工核验
