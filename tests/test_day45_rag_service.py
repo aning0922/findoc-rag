@@ -5,10 +5,12 @@ from app.rag.service import (
     CitationValidationError,
     ContextBudgetError,
     RAGService,
+    SystemErrorResult,
+    SystemErrorType,
     build_numbered_context,
     validate_and_build_citations,
 )
-from tests.test_day44_rag_service import FakeLLMClient, FakeRetriever
+from tests.test_day44_rag_service import FakeEvidenceGate, FakeLLMClient, FakeRetriever
 
 
 def test_build_numbered_context_returns_numbered_text_and_immutable_mapping() -> None:
@@ -227,10 +229,11 @@ def test_validate_and_build_citations_rejects_citation_without_answer_body() -> 
         validate_and_build_citations(model_output="[1]", numbered_context=numbered_context)
 
 
-def test_rag_service_rejects_unknown_citation_without_reclassifying_generation() -> None:
-    """Retriever返回非空证据，FakeLLMClient正常返回带[99]的非空模型草稿；
-    RAGService应原样抛出CitationValidationError，且LLM恰好调用1次；
-    若非法引用被包装成GenerationError或返回正式RAGResult，则测试失败。
+def test_invalid_citation_is_system_error_and_does_not_publish_answer() -> None:
+    """输入为合法 answer JSON，但答案引用了本次 NumberedContext 中不存在的编号；
+    预期返回 citation_validation_error 系统失败，且不发布 RAGResult；
+    若异常直接逃逸、删除非法编号后发布答案或归类为 model_refusal，
+    说明成功答案的 fail-closed 引用合同被破坏。
     """
     search_hits = [
         SearchHit(
@@ -249,19 +252,33 @@ def test_rag_service_rejects_unknown_citation_without_reclassifying_generation()
     search_filters = SearchFilters(source_file="demo.pdf")
     top_k = 5
     fake_retriever = FakeRetriever(hits=search_hits)
-    fake_llm = FakeLLMClient(response="2025年营业收入为100亿元 [99]")
-    service = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
-    with pytest.raises(CitationValidationError):
-        service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    fake_llm = FakeLLMClient(
+        response='{"decision":"answer","content":"2025年营业收入为100亿元 [99]"}'
+    )
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
+
+    result = service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    assert isinstance(result, SystemErrorResult)
+    assert result.error_type == SystemErrorType.CITATION_VALIDATION_ERROR
+    assert result.raw_error == "CitationValidationError: 编号 99 为非法编号，不存在"
+    assert len(fake_evidence_gate.calls) == 1
+    assert fake_evidence_gate.calls == [(query, search_hits)]
     assert len(fake_retriever.calls) == 1
     assert len(fake_llm.prompts) == 1
     assert query in fake_llm.prompts[0]
 
 
-def test_rag_service_skips_llm_when_first_evidence_exceeds_context_budget() -> None:
-    """Retriever返回一条非空SearchHit，但服务字符预算小于其带[1]标签后的完整渲染长度；
-    RAGService应抛出ContextBudgetError，并保持LLM调用0次；
-    若把它伪装成NoEvidenceError、截断证据或继续调用模型，则测试失败。
+def test_context_budget_failure_is_system_error_and_skips_llm() -> None:
+    """输入为 gate 已通过的非空证据，但字符预算无法容纳第一条完整证据；
+    预期返回 context_budget_error 系统失败，且 LLM 调用0次；
+    若异常直接逃逸、返回 insufficient_evidence、截断证据或调用模型，
+    说明预算失败与正常拒答的终态边界被破坏。
     """
     search_hits = [
         SearchHit(
@@ -280,9 +297,20 @@ def test_rag_service_skips_llm_when_first_evidence_exceeds_context_budget() -> N
     search_filters = SearchFilters(source_file="demo.pdf")
     top_k = 5
     fake_retriever = FakeRetriever(hits=search_hits)
-    fake_llm = FakeLLMClient(response="2025年营业收入为100亿元")
-    service = RAGService(fake_retriever, fake_llm, max_evidence_chars=5)
-    with pytest.raises(ContextBudgetError):
-        service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    fake_llm = FakeLLMClient(response='{"decision":"answer","content":"2025年营业收入为100亿元"}')
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=5,
+    )
+
+    result = service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    assert isinstance(result, SystemErrorResult)
+    assert result.error_type == SystemErrorType.CONTEXT_BUDGET_ERROR
+    assert result.raw_error == ("ContextBudgetError: 上下文预算不足，无法构建 numbered context")
+    assert len(fake_evidence_gate.calls) == 1
     assert len(fake_retriever.calls) == 1
     assert len(fake_llm.prompts) == 0
+    assert fake_evidence_gate.calls == [(query, search_hits)]

@@ -1,7 +1,12 @@
-import pytest
-
 from app.rag.retriever import Retriever, SearchHit, TrustedContext, SearchFilters
-from app.rag.service import NoEvidenceError, RAGService, RAGResult, RetrievalError, GenerationError
+from app.rag.service import (
+    RAGService,
+    RAGResult,
+    RefusalReason,
+    RefusalResult,
+    SystemErrorResult,
+    SystemErrorType,
+)
 
 
 class FakeRetriever(Retriever):
@@ -75,6 +80,38 @@ class FakeLLMClient:
         return self.response
 
 
+class FakeEvidenceGate:
+    """返回预设判断并记录调用参数，不修改证据或访问模型。"""
+
+    def __init__(self, *, allowed: bool = True, error: Exception | None = None) -> None:
+        """设置固定许可结果，并为当前实例初始化独立调用记录。
+
+        Args:
+            allowed: True 表示允许生成，False 表示证据不足。
+            error: 可选预设异常；非 None 时 allows 在记录调用后抛出。
+        """
+        self.allowed = allowed
+        self.calls: list[tuple[str, list[SearchHit]]] = []
+        self.error = error
+
+    def allows(self, query: str, hits: list[SearchHit]) -> bool:
+        """记录当前 query 和 hits，并返回预设许可结果。
+
+        Args:
+            query: 当前用户问题。
+            hits: Retriever 返回的非空有序证据。
+
+        Returns:
+            构造时设置的固定许可结果。
+        Raises:
+            Exception: 构造时配置了 error 时，记录本次调用后抛出该异常。
+        """
+        self.calls.append((query, hits))
+        if self.error is not None:
+            raise self.error
+        return self.allowed
+
+
 def test_happy_path_passes_retrieved_evidence_to_llm() -> None:
     """Happy Path：顺利检索到证据，并传递给 LLM 客户端"""
     search_hits = [
@@ -94,11 +131,17 @@ def test_happy_path_passes_retrieved_evidence_to_llm() -> None:
     search_filters: SearchFilters = SearchFilters(source_file="demo.pdf")
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(search_hits)
-    fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元。[1]")
-    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
-    rag_result: RAGResult = service.answer(
-        query, context=trusted_context, top_k=top_k, filters=search_filters
+    fake_llm: FakeLLMClient = FakeLLMClient(
+        response='{"decision":"answer","content":"营业收入为100亿元。[1]"}'
     )
+    fake_evidence_gate: FakeEvidenceGate = FakeEvidenceGate(allowed=True)
+    service: RAGService = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
+    rag_result = service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
     assert isinstance(rag_result, RAGResult)
     assert rag_result.content == "营业收入为100亿元。[1]"
     assert len(fake_retriever.calls) == 1
@@ -134,8 +177,14 @@ def test_switching_trusted_context_is_forwarded_to_retriever() -> None:
     context_b = TrustedContext(workspace_id="W-SB")
     search_filters = SearchFilters(source_file="demo.pdf")
     fake_retriever = FakeRetriever(hits=search_hits)
-    fake_llm = FakeLLMClient(response="营业收入为100亿元。[1]")
-    service = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
+    fake_llm = FakeLLMClient(response='{"decision":"answer","content":"营业收入为100亿元。[1]"}')
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
 
     service.answer(query, context=context_a, filters=search_filters)
     service.answer(query, context=context_b, filters=search_filters)
@@ -146,43 +195,71 @@ def test_switching_trusted_context_is_forwarded_to_retriever() -> None:
     assert "W-SB" not in fake_llm.prompts[1]
 
 
-def test_retrieval_failure_skips_llm() -> None:
-    """检索失败时跳过 LLM 客户端"""
+def test_retrieval_failure_is_system_error_and_skips_llm() -> None:
+    """输入为 Retriever 抛出带内部诊断文本的连接异常；
+    预期返回 retrieval_error 系统失败，保留内部 raw_error，
+    但安全 message 不暴露底层异常，且 gate 和 LLM 均不调用；
+    若异常直接逃逸、诊断信息丢失、泄露到安全说明、
+    返回 empty_retrieval 或计入正常拒答，
+    说明检索故障与空检索的终态及错误信息分层合同被破坏。
+    """
     query: str = "营业收入是多少？"
     trusted_context: TrustedContext = TrustedContext(workspace_id="W-SA")
     search_filters: SearchFilters = SearchFilters(source_file="demo.pdf")
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(hits=[], error=ConnectionError("offLine"))
     fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元")
-    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service: RAGService = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
 
-    with pytest.raises(RetrievalError) as exc_info:
-        service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
-
-    assert isinstance(exc_info.value.__cause__, ConnectionError)
+    result = service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    assert isinstance(result, SystemErrorResult)
+    assert result.error_type == SystemErrorType.RETRIEVAL_ERROR
+    assert result.message == "检索服务失败，本次未生成答案"
+    assert result.raw_error == "ConnectionError: offLine"
+    assert "offLine" not in result.message
     assert len(fake_retriever.calls) == 1
+    assert len(fake_evidence_gate.calls) == 0
     assert len(fake_llm.prompts) == 0
 
 
 def test_empty_evidence_skips_llm() -> None:
-    """空证据时抛出 NoEvidenceError"""
+    """输入为空检索结果时返回 empty_retrieval 拒答且不调用 LLM；
+    若抛出异常、调用 LLM 或发布成功答案，说明空检索终态合同被破坏。
+    """
     query: str = "营业收入是多少？"
     trusted_context: TrustedContext = TrustedContext(workspace_id="W-SA")
     search_filters: SearchFilters = SearchFilters(source_file="demo.pdf")
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(hits=[])
     fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元")
-    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service: RAGService = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
 
-    with pytest.raises(NoEvidenceError):
-        service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
-
+    result = service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    assert isinstance(result, RefusalResult)
+    assert result.reason == RefusalReason.EMPTY_RETRIEVAL
     assert len(fake_retriever.calls) == 1
     assert len(fake_llm.prompts) == 0
+    assert len(fake_evidence_gate.calls) == 0
 
 
-def test_generation_timeout_is_generation_error() -> None:
-    """生成超时抛出 GenerationError"""
+def test_generation_timeout_is_system_error() -> None:
+    """输入为通过检索和 evidence gate 的证据，但 LLM 调用抛出 TimeoutError；
+    预期返回 llm_timeout 系统失败，LLM 恰好调用1次且不发布答案；
+    若异常直接逃逸、返回 model_refusal 或进入引用校验，
+    说明模型超时与正常拒答的终态边界被破坏。
+    """
     search_hits = [
         SearchHit(
             score=0.9,
@@ -203,14 +280,23 @@ def test_generation_timeout_is_generation_error() -> None:
     fake_llm: FakeLLMClient = FakeLLMClient(
         response="营业收入为100亿元", error=TimeoutError("timeout")
     )
-    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service: RAGService = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
 
-    with pytest.raises(GenerationError) as exc_info:
-        service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
-
-    assert isinstance(exc_info.value.__cause__, TimeoutError)
+    result = service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
+    assert isinstance(result, SystemErrorResult)
+    assert result.error_type == SystemErrorType.LLM_TIMEOUT
+    assert result.raw_error == "TimeoutError: timeout"
+    assert "timeout" not in result.message
     assert len(fake_retriever.calls) == 1
+    assert len(fake_evidence_gate.calls) == 1
     assert len(fake_llm.prompts) == 1
+    assert fake_evidence_gate.calls == [(query, search_hits)]
 
 
 def test_changing_evidence_changes_llm_prompt() -> None:
@@ -240,8 +326,16 @@ def test_changing_evidence_changes_llm_prompt() -> None:
     search_filters: SearchFilters = SearchFilters(source_file="demo.pdf")
     top_k: int = 5
     fake_retriever: FakeRetriever = FakeRetriever(hits=[search_hit_1])
-    fake_llm: FakeLLMClient = FakeLLMClient(response="营业收入为100亿元。[1]")
-    service: RAGService = RAGService(fake_retriever, fake_llm, max_evidence_chars=500)
+    fake_llm: FakeLLMClient = FakeLLMClient(
+        response='{"decision":"answer","content":"营业收入为100亿元。[1]"}'
+    )
+    fake_evidence_gate = FakeEvidenceGate(allowed=True)
+    service: RAGService = RAGService(
+        retriever=fake_retriever,
+        llm_client=fake_llm,
+        evidence_gate=fake_evidence_gate,
+        max_evidence_chars=500,
+    )
     service.answer(query, context=trusted_context, top_k=top_k, filters=search_filters)
     prompt1 = fake_llm.prompts[0]
 

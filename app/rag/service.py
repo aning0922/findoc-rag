@@ -1,10 +1,13 @@
 from dataclasses import dataclass
+from enum import StrEnum
+import json
 import re
 from typing import Mapping, Protocol
 from types import MappingProxyType
 
 from app.rag.retriever import Retriever, SearchHit, TrustedContext, SearchFilters
 
+TRUSTED_RAG_PROMPT_VERSION = "trusted-rag-json-v1"
 
 class GenerationError(RuntimeError):
     """generation 阶段因超时、调用失败或无有效内容而失败，不能作为空证据或成功结果处理"""
@@ -133,6 +136,102 @@ def validate_and_build_citations(
     return tuple(citations)
 
 
+class SystemErrorType(StrEnum):
+    """系统、配置、供应商或输出合同问题"""
+
+    RETRIEVAL_ERROR = "retrieval_error"
+    """Retriever抛出异常、embedding 查询失败，Milvus 连接失败，检索过滤或返回结果异常"""
+    EVIDENCE_GATE_ERROR = "evidence_gate_error"
+    """非空检索结果进入生成前资格判断时，EvidenceGate 自身执行失败。"""
+    CONTEXT_BUDGET_ERROR = "context_budget_error"
+    """context预算不能容纳第一条完整证据"""
+    LLM_TIMEOUT = "llm_timeout"
+    """模型调用明确超时,客户端把供应商超时规范转化为超时错误"""
+    LLM_PROVIDER_ERROR = "llm_provider_error"
+    """供应商返回服务错误，认证失败，额度不足，sdk 调用异常，网络错误"""
+    EMPTY_MODEL_OUTPUT = "empty_model_output"
+    """模型调用返回的没有有效内容"""
+    PROTOCOL_PARSE_ERROR = "protocol_parse_error"
+    """不是合法 json，markdown 代码包裹 json，缺少 decision，decision未知，answer分支缺少 content，refuse 携带不允许 content，字段类型错误，结构不是对象"""
+    CITATION_VALIDATION_ERROR = "citation_validation_error"
+    """decision=answer,协议解析已经成功，但回答没有引用，只有引用没有答案主体，引用了不存在的编号，"""
+
+
+@dataclass(frozen=True)
+class SystemErrorResult:
+    """本次请求因为系统、配置、供应商或输出合同问题而失败，不能发布答案，也不能计入正常拒答"""
+
+    error_type: SystemErrorType
+    """统计 分支 稳定机器码"""
+    message: str
+    """安全 稳定的用户说明"""
+    raw_error: str | None = None
+    """内部诊断和原始 baseline 不可以直接暴露给用户"""
+
+    def __post_init__(self) -> None:
+        """校验错误类型、安全说明和可选内部诊断信息。
+
+        类型非法、说明为空，或 raw_error 非字符串/为空白时拒绝构造。
+        """
+        if not isinstance(self.error_type, SystemErrorType):
+            raise TypeError("error_type 必须是 SystemErrorType")
+        if not isinstance(self.message, str):
+            raise TypeError("message 必须是字符串")
+        if not self.message.strip():
+            raise ValueError("message 必须是非空字符串")
+        if self.raw_error is not None and not isinstance(self.raw_error, str):
+            raise TypeError("raw_error 必须是字符串或 None")
+        if self.raw_error is not None and not self.raw_error.strip():
+            raise ValueError("raw_error 必须是非空字符串")
+
+
+def _format_raw_error(exc: BaseException) -> str:
+    """将内部异常格式化为稳定诊断文本。
+
+    Args:
+        exc: 被服务层捕获的底层异常。
+
+    Returns:
+        “异常类名: 异常字符串”；异常字符串为空时只返回类名
+
+    边界:
+        结果仅供内部诊断和原始 baseline 使用，不得作为用户安全说明。
+        本函数不打印异常，也不展开 traceback 或异常因果链。
+    """
+    detail = str(exc).strip()
+    if not detail:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {detail}"
+
+
+class _ModelProtocolError(RuntimeError):
+    """LLM 返回了内容，但内容不符合冻结的唯一 JSON 协议"""
+
+
+@dataclass(frozen=True)
+class _ModelAnswer:
+    """保存模型按 answer 协议返回的待验证正文。
+
+    content 尚未通过引用校验，不是正式 RAGResult；
+    非字符串或空白正文不得成为合法模型回答。
+    """
+
+    content: str
+
+    def __post_init__(self) -> None:
+        """校验待验证答案正文为非空字符串，否则报告模型协议错误。"""
+        if not isinstance(self.content, str) or not self.content.strip():
+            raise _ModelProtocolError("answer.content 必须是非空字符串")
+
+
+@dataclass(frozen=True)
+class _ModelRefusal:
+    """表示模型按唯一 JSON 协议明确拒答；不携带答案、引用或领域 reason。"""
+
+
+_ParsedModelOutput = _ModelAnswer | _ModelRefusal
+
+
 @dataclass(frozen=True)
 class RAGResult:
     """输入：经过引用验证的答案和服务端 Citation。
@@ -153,6 +252,101 @@ class RAGResult:
             raise CitationValidationError("citations 必须是非空序列")
 
 
+class RefusalReason(StrEnum):
+    """稳定表示正常业务拒答发生在哪一层"""
+
+    EMPTY_RETRIEVAL = "empty_retrieval"
+    """Retriever 成功执行但返回空证据列表"""
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    """非空证据未通过生成前 evidence gate"""
+    MODEL_REFUSAL = "model_refusal"
+    """模型明确拒绝回答当前问题"""
+
+
+@dataclass(frozen=True)
+class RefusalResult:
+    """系统正常完成了足够的判断，并确定当前请求不能基于现有证据形成可信答案"""
+
+    reason: RefusalReason
+
+    def __post_init__(self) -> None:
+        """校验拒答原因；非 RefusalReason 值不得成为正式拒答。"""
+        if not isinstance(self.reason, RefusalReason):
+            raise TypeError("reason 必须是 RefusalReason")
+
+
+def _parse_model_output(raw_output: str) -> _ParsedModelOutput:
+    """严格解析唯一模型 JSON 协议。
+
+    Args:
+        raw_output: LLM 返回的非空原始字符串。
+
+    Returns:
+        _ModelAnswer：模型声明回答并提供待验证正文。
+        _ModelRefusal：模型按正式协议拒答。
+
+    Raises:
+        _ModelProtocolError：JSON、顶层结构、字段集合、decision 或 content
+            不符合冻结协议。
+
+    边界:
+        本函数不自动修复输出、不解析 Markdown、不校验引用，也不构造领域终态。
+    """
+    try:
+        parsed_output = json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        raise _ModelProtocolError(f"模型返回了非法 JSON: {exc}") from exc
+    if parsed_output is None:
+        raise _ModelProtocolError("模型返回了空 JSON")
+    if not isinstance(parsed_output, dict):
+        raise _ModelProtocolError("模型返回了非法 JSON: 不是对象")
+    if "decision" not in parsed_output:
+        raise _ModelProtocolError("模型返回了非法 JSON: 缺少 decision 字段")
+    decision = parsed_output["decision"]
+    if not isinstance(decision, str):
+        raise _ModelProtocolError("模型返回了非法 JSON: decision 字段必须是字符串")
+    if decision not in ["answer", "refuse"]:
+        raise _ModelProtocolError(
+            f"模型返回了非法 JSON: decision 字段必须是 answer 或 refuse, 实际值: {decision}"
+        )
+    if decision == "refuse":
+        if set(parsed_output) != {"decision"}:
+            raise _ModelProtocolError("refuse 分支只能包含 decision 字段")
+        return _ModelRefusal()
+    else:
+        if set(parsed_output) != {"decision", "content"}:
+            raise _ModelProtocolError("answer 分支只能包含 decision 和 content 字段")
+        content = parsed_output["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise _ModelProtocolError("answer.content 必须是非空字符串")
+        return _ModelAnswer(content=content)
+
+
+class EvidenceGate(Protocol):
+    """定义生成前证据资格判断边界。
+
+    输入是当前问题和 Retriever 返回的非空有序证据；
+    返回 True 表示允许进入 Context 构造和模型生成，
+    返回 False 表示正常的 insufficient_evidence 拒答。
+    实现不得修改 hits 或调用 LLM；实现异常属于系统失败，不等于证据不足。
+    """
+
+    def allows(self, query: str, hits: list[SearchHit]) -> bool:
+        """判断非空候选证据是否具备进入生成阶段的最低资格。
+
+        Args:
+            query: 当前用户问题。
+            hits: Retriever 返回的非空有序 SearchHit 列表。
+
+        Returns:
+            True 表示允许生成，False 表示证据不足。
+
+        Raises:
+            具体 gate 实现失败时原样抛出；调用方必须将其视为系统错误。
+        """
+        ...
+
+
 class LLMClient(Protocol):
     """定义控制层所依赖的可替换非流式模型调用边界；
     具体实现接收 prompt、返回未验证的非空生成内容，
@@ -162,7 +356,8 @@ class LLMClient(Protocol):
     def generate(self, prompt: str) -> str:
         """使用控制层构造好的 prompt 执行一次非流式生成；
         输入是非空 prompt，输出是未经过引用验证的非空文本，
-        失败时由具体实现抛出异常
+        供应商超时应由具体适配器规范化为 TimeoutError；
+        其他供应商或网络失败抛出普通异常。
 
         Args:
             prompt: 控制层构造好的 prompt
@@ -174,36 +369,47 @@ class LLMClient(Protocol):
         ...
 
 
+RAGOutcome = RAGResult | RefusalResult | SystemErrorResult
+
+
 class RAGService:
-    """协调可信非流式 RAG 成功链。
+    """协调可信非流式 RAG 的回答、拒答和系统失败终态。
 
-    依次协调现有 Retriever、空证据闸门、预算内编号 Context、
-    LLMClient.generate 和引用验证。
-    只有模型答案正文非空、至少包含一个引用且所有编号均存在时，
-    才返回带服务端 Citation 的唯一正式 RAGResult。
-
+    依次协调 Retriever、空检索判断、生成前 EvidenceGate、
+    预算内 NumberedContext、LLMClient 和 Day45 引用校验。
+    只有模型按正式协议声明回答且引用校验通过时才返回 RAGResult；
+    空检索、生成前证据不足和模型正式拒答分别返回稳定拒答结果。
     TrustedContext 只传给 Retriever，不进入模型 prompt。
-    本服务不负责真实模型客户端实现、正式用户拒答、API 或 SSE。
+    本服务不负责真实模型客户端实现、API、SSE 或前端。
+    EvidenceGate 正常返回 False 时形成证据不足拒答；
+    Gate 自身异常形成 evidence_gate_error，且不会调用 LLM。
     """
 
     def __init__(
         self,
+        *,
         retriever: Retriever,
         llm_client: LLMClient,
+        evidence_gate: EvidenceGate,
         max_evidence_chars: int,
     ) -> None:
         """初始化 RAG 控制层及固定证据字符预算。
 
         Args:
             retriever: 现有检索器，接收 query、TrustedContext 和业务过滤条件，
-                返回有序 SearchHit 列表；失败由 answer 转换为 RetrievalError。
+                返回有序 SearchHit 列表；失败由 answer 转换为 SystemErrorResult(RETRIEVAL_ERROR)
             llm_client: 非流式模型调用边界，接收 prompt 并返回不可信原始字符串；
-                调用失败由 answer 转换为 GenerationError。
+                超时和其他调用失败由 answer 分别转换为
+                SystemErrorResult(LLM_TIMEOUT) 和
+                SystemErrorResult(LLM_PROVIDER_ERROR)
+            evidence_gate: 生成前证据资格判断；接收 query 和非空 hits，
+                返回是否允许进入 Context 构造和模型生成。
             max_evidence_chars: 单次请求允许进入模型的最终渲染证据区域字符数；
                 只约束编号证据文本，不代表完整 prompt 或真实 token 窗口。
         """
         self._retriever = retriever
         self._llm_client = llm_client
+        self._evidence_gate = evidence_gate
         self._max_evidence_chars = max_evidence_chars
 
     def answer(
@@ -213,7 +419,7 @@ class RAGService:
         context: TrustedContext,
         top_k: int = 5,
         filters: SearchFilters | None = None,
-    ) -> RAGResult:
+    ) -> RAGOutcome:
         """执行一次非流式可信 RAG 请求。
 
         Args:
@@ -224,44 +430,99 @@ class RAGService:
             filters: 用户允许选择的业务检索过滤条件，不包含可信 workspace。
 
         Returns:
-            唯一正式 RAGResult；content 保留已验证的内联 [n]，
-            citations 保存按首次引用顺序生成的服务端可信引用。
-
-        Raises:
-            RetrievalError: Retriever 调用失败，并保留底层异常 cause。
-            NoEvidenceError: Retriever 成功执行但返回空证据列表。
-            ContextBudgetError: 非空检索结果中，第一条完整渲染证据也无法进入预算。
-            GenerationError: LLMClient 调用失败、超时，或没有返回有效非空字符串。
-            CitationValidationError: 模型草稿无引用、无答案正文，或包含不存在的编号。
+            RAGResult：已通过引用校验的可信成功答案。
+            RefusalResult：空检索等正常业务拒答。
+            SystemErrorResult：检索、生成、解析、预算或引用校验等系统失败。
         """
+
         try:
             search_hits = self._retriever.retrieve(
                 query, context=context, top_k=top_k, filters=filters
             )
         except Exception as exc:
-            raise RetrievalError(f"检索失败: {exc}") from exc
+            return SystemErrorResult(
+                error_type=SystemErrorType.RETRIEVAL_ERROR,
+                message="检索服务失败，本次未生成答案",
+                raw_error=_format_raw_error(exc),
+            )
 
         if not search_hits:
-            raise NoEvidenceError("没有检索到证据")
+            return RefusalResult(reason=RefusalReason.EMPTY_RETRIEVAL)
 
-        numbered_context = build_numbered_context(
-            search_hits, max_evidence_chars=self._max_evidence_chars
-        )
+        try:
+            evidence_allowed = self._evidence_gate.allows(query, search_hits)
+        except Exception as exc:
+            return SystemErrorResult(
+                error_type=SystemErrorType.EVIDENCE_GATE_ERROR,
+                message="证据资格判断失败，本次未生成答案",
+                raw_error=_format_raw_error(exc),
+            )
+        if not evidence_allowed:
+            return RefusalResult(reason=RefusalReason.INSUFFICIENT_EVIDENCE)
+
+        try:
+            numbered_context = build_numbered_context(
+                search_hits, max_evidence_chars=self._max_evidence_chars
+            )
+        except (ContextBudgetError, TypeError, ValueError) as exc:
+            return SystemErrorResult(
+                error_type=SystemErrorType.CONTEXT_BUDGET_ERROR,
+                message="上下文预算配置或证据构造失败，本次未生成答案",
+                raw_error=_format_raw_error(exc),
+            )
+
         prompt = (
             "请只依据下面带编号的证据回答问题，不要引入证据以外的信息。\n"
-            "答案中的每个事实性结论都必须使用内联 [n] 标明证据编号。\n"
-            "只返回答案正文和引用编号，不要返回或猜测 source_file、page、chunk_id。\n\n"
+            "先判断这些证据是否足以回答问题。\n"
+            "证据充分时，只返回一个 JSON 对象："
+            '{"decision":"answer","content":"带内联 [n] 引用的答案"}。\n'
+            "答案中的每个事实性结论都必须使用存在的 [n] 标明证据编号。\n"
+            '证据不足时，只返回：{"decision":"refuse"}。\n'
+            "不得使用 Markdown 代码块，不得在 JSON 前后添加解释。\n"
+            "不得返回或猜测 source_file、page、chunk_id。\n\n"
             f"问题：{query}\n\n"
             f"证据：\n{numbered_context.text}"
         )
         try:
             content = self._llm_client.generate(prompt)
-
+        except TimeoutError as exc:
+            return SystemErrorResult(
+                error_type=SystemErrorType.LLM_TIMEOUT,
+                message="模型调用超时，本次未生成答案",
+                raw_error=_format_raw_error(exc),
+            )
         except Exception as exc:
-            raise GenerationError(f"生成失败: {exc}") from exc
+            return SystemErrorResult(
+                error_type=SystemErrorType.LLM_PROVIDER_ERROR,
+                message="模型服务调用失败，本次未生成答案",
+                raw_error=_format_raw_error(exc),
+            )
 
         if not isinstance(content, str) or not content.strip():
-            raise GenerationError("content 必须是非空字符串")
+            return SystemErrorResult(
+                error_type=SystemErrorType.EMPTY_MODEL_OUTPUT,
+                message="模型返回空内容，本次未生成答案",
+                raw_error=None,
+            )
+        try:
+            parsed_output = _parse_model_output(content)
+            if isinstance(parsed_output, _ModelRefusal):
+                return RefusalResult(reason=RefusalReason.MODEL_REFUSAL)
 
-        citations: tuple[Citation, ...] = validate_and_build_citations(content, numbered_context)
-        return RAGResult(content=content, citations=citations)
+        except _ModelProtocolError as exc:
+            return SystemErrorResult(
+                error_type=SystemErrorType.PROTOCOL_PARSE_ERROR,
+                message="模型输出不符合正式协议，本次未发布答案",
+                raw_error=_format_raw_error(exc),
+            )
+        try:
+            citations: tuple[Citation, ...] = validate_and_build_citations(
+                parsed_output.content, numbered_context
+            )
+        except (CitationValidationError, TypeError, ValueError) as exc:
+            return SystemErrorResult(
+                error_type=SystemErrorType.CITATION_VALIDATION_ERROR,
+                message="模型答案未通过引用校验，本次未发布答案",
+                raw_error=_format_raw_error(exc),
+            )
+        return RAGResult(content=parsed_output.content, citations=citations)
