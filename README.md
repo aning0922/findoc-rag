@@ -2,8 +2,9 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** Day44 已完成可测试的最小非流式 RAG 控制层，复用现有 Retriever，并用 fake 验证生成前空证据闸门、prompt 输入与检索/生成失败归属。
-> 真实 LLM 接入、引用校验、正式拒答、RAG API、Agent 工作流、权限系统和 Web 界面尚未实现，本仓库暂不适合生产使用。
+> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配和 React/TypeScript 单页薄壳。
+> 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环，并验证范围外问题进入正常拒答。
+> 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
 ## 项目目标
 
@@ -15,7 +16,7 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 - 建立可重复的检索评测，记录 badcase、延迟和质量变化
 - 在检索可靠后，再增加引用回答、拒答、工具调用和审核工作流
 
-当前仓库只覆盖这条路线的前半段，不把规划中的能力描述为已经完成。
+当前仓库已覆盖从解析、检索、可信生成到最薄浏览器问答的单机链路；未完成的生产能力仍保持明确边界，不把规划描述为已实现。
 
 ## 当前状态
 
@@ -30,8 +31,11 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | 向量摄取与文档生命周期 | 小样本Gate通过 | Day40已验证合法chunk、embedding text、vector和Milvus row一一对应，并实现一种按`document_id`删除后重建的收敛策略；尚无事务或原子替换 |
 | Retriever | Day43同配置对照通过 | 依赖注入、稳定`SearchHit`和可信workspace/source_file过滤保持不变；v2真实schema带workspace，legacy仅由实验兼容store移除经验证的workspace条件 |
 | 检索评测 | Day43新旧对照完成 | 12题/13个证据ID迁移到v2；同bge-m3、COSINE、top_k=5和Retriever下，Hit@1 0.20→0.20、Hit@5 0.40→0.50、MRR 0.27→0.3333；逐题原始结果独立保留 |
-| RAG 控制层 | Day44 fake链通过 | `retrieve → 空证据evidence gate → 最小prompt → LLMClient → RAGResult`；检索失败、空证据和生成超时有独立异常与fake调用次数证据 |
-| RAG API / Agent / Web | 计划中 | 尚无真实模型全链或可运行网络入口 |
+| RAG 控制层 | 可信终态链已实现 | `retrieve → evidence gate → context/prompt → generation → parse/citation validation → RAGResult/RefusalResult/SystemErrorResult`；非法引用 fail-closed |
+| 上传状态链 | 单进程原型可运行 | `queued → parsing → indexing → ready/failed`；SQLite 记录和 LocalObjectStore 持久，但内存任务不耐久 |
+| 可信聊天 API 与 SSE | 可运行 | POST 请求只接受 `document_id/query`；服务端恢复 workspace 并构造 `document_id` 过滤；事件固定为 `status/final_answer/citation/usage/error/done` |
+| React/TypeScript 页面 | 最薄闭环可运行 | 上传、列表、轮询、ready 选择、问答、拒答、安全错误、答案与可验证引用；Node 24 + Vite 代理 |
+| Agent / 权限 / 生产基础设施 | 计划中 | 未实现 Agent、登录、多用户、Redis、S3、可靠队列或后台恢复 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
 
@@ -59,15 +63,27 @@ embedding texts → dense vectors
 query embedding + 可信上下文/业务过滤
         ↓
 dense top-k → SearchHit DTO
-        ├─离线评测分支→ Hit@K / MRR
-        └─Day44控制分支→ 最小空证据evidence gate
+        ├─冻结评测分支 → Hit@K / MRR
+        └─可信问答分支 → evidence gate
                               ↓
-                    问题 + SearchHit.text → 最小prompt
+                    context budget + 编号证据映射
                               ↓
-                    LLMClient（仅fake验证）→ 未引用校验的RAGResult
+                    LLM生成 → 引用解析与fail-closed校验
+                              ↓
+             RAGResult / RefusalResult / SystemErrorResult
+                              ↓
+                    SSE安全终态 → React页面
 ```
 
-目前生产数据链到检索结果已有真实本地证据；Day44后续控制链仅用fake验证调用顺序和错误边界，还没有真实模型问答、引用校验或正式无证据拒答。
+runtime 上传链为：
+
+```text
+浏览器PDF → 文档状态API → parser/chunk/BGE
+        → data/runtime/milvus.db
+        → findoc_runtime_documents_v1
+```
+
+runtime 上传与聊天只访问 `findoc_runtime_documents_v1`，不读取或写入 `findoc_day43_v2` 冻结评测库。自动测试覆盖调用顺序、可信过滤和失败边界；另有一次真实成功回答与引用、一次真实正常拒答的浏览器 smoke。真实 smoke 不是公开 benchmark，也不证明生产可靠性。
 MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_list.json` 输出。
 
 Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
@@ -92,8 +108,11 @@ Day44在不重建Retriever或workspace过滤的前提下，新增供应商无关
 - Milvus Lite
 - pytest
 - OpenAI Python SDK（调用 DeepSeek 兼容接口）
+- FastAPI / StreamingResponse
+- React 19 / TypeScript / Vite
+- Node.js 24
 
-FastAPI、LangChain Agent、LangGraph、PostgreSQL、React 和 Docker Compose 属于后续路线，不是当前已实现技术栈。
+LangChain Agent、LangGraph、PostgreSQL、Redis、S3、Docker Compose 和生产级身份系统属于后续路线，不是当前已实现技术栈。
 
 ## 快速开始
 
@@ -123,9 +142,31 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前基线为`190 passed`。`uv run ruff check app experiments tests scripts`、`uv run mypy app`、Day44测试文件以及8个Day43实验模块的mypy检查通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
+当前后端质量门为 `263 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，mypy 检查 34 个源码文件通过。前端 6 个流协议测试、TypeScript/Vite build 和 oxlint 通过。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
 
-### 3. 运行可选的 LLM 示例
+### 3. 启动可信上传与问答页面
+
+复制环境变量模板并填写真实 LLM 配置后，无 `--reload` 启动后端，避免开发重载丢失内存任务：
+
+```bash
+cp .env.example .env
+uv run uvicorn app.api.main:app \
+  --env-file .env \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+另开终端启动 Node 24 和 Vite：
+
+```bash
+nvm use
+npm --prefix frontend ci
+npm --prefix frontend run dev -- --host 127.0.0.1
+```
+
+浏览器访问 `http://127.0.0.1:5173`。Vite 将 `/api` 代理到 `127.0.0.1:8000`，当前不扩展 CORS 设计。
+
+### 4. 运行可选的 LLM 示例
 
 ```bash
 cp .env.example .env
@@ -148,10 +189,12 @@ app/
 │   ├── metrics.py      # Hit@K、RR与MRR
 │   ├── store.py        # Milvus Lite 建库、写入和搜索
 │   ├── retriever.py    # 最小 dense retriever
-│   └── service.py      # Day44最小非流式RAG控制层与LLM边界
-├── api/                # 预留，尚未实现
+│   └── service.py      # 可信非流式RAG、引用校验、拒答与系统失败边界
+├── api/                # health、文档状态API、聊天路由与SSE适配
+├── chat/               # 服务端可信请求准备与同步RAG的异步边界
 ├── gateway/            # 预留，尚未实现
 └── agent/              # 预留，尚未实现
+frontend/               # React/TypeScript/Vite单页薄壳与SSE流解析测试
 scripts/                # 解析、分块、Embedding 和 Milvus 实验脚本
 experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
@@ -174,8 +217,13 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 - 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
 - 当前仍只有12题探索性对照；第8周P0扩展到总20题，第11周扩展到30～50题并增加未参与调试的holdout集；7,451/5,269行都只是本地规模，不是质量指标
 - legacy表格embedding text退化缺陷作为历史事实保留；v2已让标题、表头和表体进入检索text，但Q3/Q4/Q7/Q8/Q11仍未进入Top 5，后续必须另做受控检索诊断
-- 当前只有fake LLM验证的最小非流式生成控制链；没有真实模型全链、引用验证、正式拒答、RAG API、鉴权或多用户隔离
-- 没有可直接使用的 Web 产品界面
+- runtime上传库与冻结评测库相互隔离；浏览器闭环只查询上传文档所在的`findoc_runtime_documents_v1`
+- `InProcessTaskDispatcher`不耐久；进程异常退出会使`queued/parsing/indexing`记录悬空，目前不做启动恢复或可靠队列。真实调试留下两条`indexing`记录，未伪装为ready
+- 同步RAG通过`asyncio.to_thread`离开event loop；浏览器断开不代表已经进入线程的底层工作被取消
+- LLMClient当前不提供真实token usage，因此保留`usage`事件合同但不发送固定0或伪造数字
+- Milvus Lite在本机真实运行中出现过gRPC fork/keepalive提示和一次启动退出码139；BGE首次预热必须早于Milvus/gRPC初始化，已有collection在重启后必须显式load。受控重试后真实成功问答与正常拒答均已完成
+- runtime使用固定`demo` workspace，不等于已经实现登录、权限或多租户隔离
+- 当前不做token逐字直通、Prompt A/B、后台恢复、Redis/S3、多页面或复杂UI
 
 ## Roadmap
 
@@ -184,9 +232,9 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate~~（Day42完成）；第8周扩展到总20题P0、25题目标，第11周扩展到30～50题并增加holdout集
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
-6. 增加稳定引用映射、引用校验、正式拒答与RAG API
+6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
 7. 增加Function Calling、可恢复工作流和人工审核
-8. 增加鉴权、workspace隔离、React界面、Docker和可观测性
+8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
 
@@ -195,4 +243,4 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 - 仓库不包含年报 PDF、解析产物、向量数据库、模型文件或 API 密钥
 - 本地实验仅使用公开披露文件，原始文件的使用应遵守其来源条款
 - 本项目用于工程学习和信息检索研究，不构成投资建议
-- 真实模型生成式回答、引用校验和自动审核尚未实现；未来版本的输出仍需人工核验
+- 已完成一次真实模型可信问答与正常拒答 smoke，但输出仍需人工核验，不构成生产质量或自动审核承诺

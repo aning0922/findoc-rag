@@ -323,3 +323,82 @@ def test_gate_ignores_user_workspace_and_returns_empty_for_missing_source() -> N
         "营业收入是多少？", context=trusted_context, top_k=2, filters=filters
     )
     assert actual == []
+
+
+def test_build_filter_expression_combines_workspace_and_document_id() -> None:
+    """证明文档过滤始终与服务端可信workspace组合。
+
+    输入：可信workspace和唯一document_id过滤。
+    输出：表达式依次包含workspace_id与document_id。
+    失败边界：不得丢失workspace，也不得退回source_file身份。
+    """
+    context = TrustedContext(workspace_id="WS-A")
+    filters = SearchFilters(document_id="DOC-A")
+    actual = build_filter_expression(context, filters)
+    assert actual == 'workspace_id == "WS-A" and document_id == "DOC-A"'
+
+
+def test_build_filter_expression_places_document_before_source_file() -> None:
+    """证明文档身份过滤先于仅供理解的文件名过滤。
+
+    输入：同时包含document_id和source_file的过滤条件。
+    输出：表达式顺序固定为workspace、document_id、source_file。
+    失败边界：字段顺序变化时测试失败，避免合同无意漂移。
+    """
+    filters = SearchFilters(source_file="demo.pdf", document_id="DOC-A")
+    actual = build_filter_expression(TRUSTED_CONTEXT, filters)
+    assert (
+        actual == 'workspace_id == "WS-A" and document_id == "DOC-A" and source_file == "demo.pdf"'
+    )
+
+
+def test_document_id_quote_is_json_escaped_in_filter_expression() -> None:
+    """证明document_id中的引号只能作为字段值而不能注入表达式。
+
+    输入：包含双引号的document_id。
+    输出：双引号经过JSON转义后进入document_id比较条件。
+    失败边界：不得手工拼接成可改变过滤结构的表达式。
+    """
+    filters = SearchFilters(document_id='DOC-"A')
+    actual = build_filter_expression(TRUSTED_CONTEXT, filters)
+    assert actual == 'workspace_id == "WS-A" and document_id == "DOC-\\"A"'
+
+
+def test_search_filters_rejects_non_string_document_id() -> None:
+    """证明非字符串document_id不能成为检索过滤条件。
+
+    输入：运行时传入整数document_id。
+    输出：不构造SearchFilters。
+    失败边界：必须抛出TypeError并指出document_id类型错误。
+    """
+    with pytest.raises(TypeError, match="document_id"):
+        SearchFilters(document_id=123)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("document_id", ["", " ", "\t"])
+def test_search_filters_rejects_blank_document_id(
+    document_id: str,
+) -> None:
+    """证明空字符串和纯空白不能成为稳定文档身份。
+
+    输入：空字符串、空格或制表符document_id。
+    输出：不构造SearchFilters。
+    失败边界：必须抛出ValueError并指出document_id不能为空。
+    """
+    with pytest.raises(ValueError, match="document_id"):
+        SearchFilters(document_id=document_id)
+
+
+def test_search_filters_rejects_non_string_source_file() -> None:
+    """证明document_id缺省时，非字符串source_file仍会被拒绝。"""
+    with pytest.raises(TypeError, match="source_file"):
+        SearchFilters(source_file=123)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("source_file", ["", " ", "\t"])
+def test_search_filters_rejects_blank_source_file(
+    source_file: str,
+) -> None:
+    """证明document_id缺省时，空白source_file仍会被拒绝。"""
+    with pytest.raises(ValueError, match="source_file"):
+        SearchFilters(source_file=source_file)

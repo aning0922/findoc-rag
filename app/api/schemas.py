@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.documents.models import DocumentStatus, FailureStage
 
@@ -31,3 +31,18 @@ class DocumentUploadResponse(DocumentResponse):
     """上传请求结果，额外说明是否命中已有相同内容。"""
 
     duplicate: bool
+
+
+class ChatRequest(BaseModel):
+    """浏览器提交的最小聊天请求，不接受可信上下文或过滤表达式。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str = Field(
+        min_length=1,
+        description="浏览器当前选择的文档查找键",
+    )
+    query: str = Field(
+        min_length=1,
+        description="用户针对所选文档提出的问题",
+    )

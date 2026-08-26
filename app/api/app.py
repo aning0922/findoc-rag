@@ -4,15 +4,20 @@ from fastapi import (
     FastAPI,
     File,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
+from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
+    ChatRequest,
     DocumentResponse,
     DocumentUploadResponse,
     HealthResponse,
 )
+from app.api.sse import stream_chat_sse
+from app.chat.service import ChatService, DocumentNotReadyError
 from app.documents.models import (
     DocumentNotFoundError,
     DocumentStateConflictError,
@@ -45,9 +50,10 @@ def _to_upload_response(
 def create_app(
     document_service: DocumentService,
     *,
+    chat_service: ChatService | None = None,
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
 ) -> FastAPI:
-    """创建只包含health和文档处理接口的FastAPI应用。
+    """创建包含health、文档处理和可选可信聊天接口的FastAPI应用
 
     Args:
         document_service: 已注入基础设施依赖的文档应用服务。
@@ -158,5 +164,42 @@ def create_app(
             ) from exc
 
         return DocumentResponse.model_validate(record)
+
+    @app.post("/chat")
+    async def chat(
+        payload: ChatRequest,
+        request: Request,
+    ) -> StreamingResponse:
+        """对通过HTTP前置检查的聊天请求返回SSE响应。
+
+        输入：只包含document_id和query的浏览器请求。
+        输出：通过前置检查后返回text/event-stream。
+        失败：文档不存在返回404，未ready返回409，未注入聊天服务返回503。
+        边界：不执行检索或引用验证，只连接ChatService和SSE传输层。
+        """
+        if chat_service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="聊天服务未启用",
+            )
+        try:
+            prepared = await chat_service.prepare(
+                document_id=payload.document_id, query=payload.query
+            )
+        except DocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文档不存在",
+            ) from exc
+        except DocumentNotReadyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="只有处理成功的文档可以聊天",
+            ) from exc
+        return StreamingResponse(
+            stream_chat_sse(chat_service, prepared, request.is_disconnected),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return app

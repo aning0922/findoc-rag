@@ -26,18 +26,25 @@ class TrustedContext:
 
 @dataclass(frozen=True)
 class SearchFilters:
-    """用户可以选择的业务检索过滤条件"""
+    """服务端组装的业务过滤条件，不接受浏览器提交的任意过滤表达式。"""
 
     source_file: str | None = None
+    document_id: str | None = None
 
     def __post_init__(self) -> None:
-        """确保 source_file 缺省或者为非空字符串"""
-        if self.source_file is None:
-            return
-        if not isinstance(self.source_file, str):
-            raise TypeError("source_file 必须是字符串或 None")
-        if not str.strip(self.source_file):
-            raise ValueError("source_file 不能为空字符串")
+        """确保 document_id 和 source_file 缺省或者为非空字符串"""
+
+        if self.document_id is not None:
+            if not isinstance(self.document_id, str):
+                raise TypeError("document_id 必须是字符串或 None")
+            if not str.strip(self.document_id):
+                raise ValueError("document_id 不能为空字符串")
+
+        if self.source_file is not None:
+            if not isinstance(self.source_file, str):
+                raise TypeError("source_file 必须是字符串或 None")
+            if not str.strip(self.source_file):
+                raise ValueError("source_file 不能为空字符串")
 
 
 def build_filter_expression(context: TrustedContext, filters: SearchFilters | None = None) -> str:
@@ -45,8 +52,11 @@ def build_filter_expression(context: TrustedContext, filters: SearchFilters | No
     clauses = [
         f"workspace_id == {json.dumps(context.workspace_id, ensure_ascii=False)}",
     ]
+    if filters is not None and filters.document_id is not None:
+        clauses.append(f"document_id == {json.dumps(filters.document_id, ensure_ascii=False)}")
     if filters is not None and filters.source_file is not None:
         clauses.append(f"source_file == {json.dumps(filters.source_file, ensure_ascii=False)}")
+
     return " and ".join(clauses)
 
 

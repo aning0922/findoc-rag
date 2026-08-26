@@ -9,6 +9,7 @@ from app.rag.retriever import Retriever, SearchHit, TrustedContext, SearchFilter
 
 TRUSTED_RAG_PROMPT_VERSION = "trusted-rag-json-v1"
 
+
 class GenerationError(RuntimeError):
     """generation 阶段因超时、调用失败或无有效内容而失败，不能作为空证据或成功结果处理"""
 
