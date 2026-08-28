@@ -8,11 +8,23 @@ from app.agent.tool_loop import (
     LoopFailureType,
     LoopSuccess,
     ToolErrorType,
+    ToolExecutionContext,
     ToolSpec,
     run_tool_loop,
 )
+from app.rag.retriever import SearchFilters, TrustedContext
 
 Message = dict[str, object]
+
+FakeToolExecutionContext = ToolExecutionContext(
+    trusted_context=TrustedContext(
+        workspace_id="WS-A",
+    ),
+    filters=SearchFilters(
+        source_file="demo.pdf",
+        document_id="DOC-7",
+    ),
+)
 
 
 class ScriptedFakeModel:
@@ -46,10 +58,11 @@ class ScriptedFakeModel:
         return response
 
 
-def lookup_demo_item(item_id: str) -> dict[str, object]:
+def lookup_demo_item(execution_context: ToolExecutionContext, item_id: str) -> dict[str, object]:
     """根据样品ID返回样品标签。
 
     输入：
+        execution_context：工具执行上下文，ToolExecutionContext对象
         item_id：样品 ID，字符串
     输出：
         包含item_id和label的dict[str, str]。
@@ -71,6 +84,7 @@ def test_scripted_fake_records_tool_call_and_result_message_sequence() -> None:
     且fake模型保存的两次messages快照顺序正确、互不污染；
     若工具被重复执行、消息顺序错误、ID不匹配或脚本没有有限结束，则测试失败。
     """
+
     tool_request: Message = {
         "role": "assistant",
         "content": None,
@@ -109,7 +123,7 @@ def test_scripted_fake_records_tool_call_and_result_message_sequence() -> None:
     tool_name = function_call.get("name")
     assert tool_name == "lookup_demo_item"
 
-    tool_result = lookup_demo_item(item_id)
+    tool_result = lookup_demo_item(FakeToolExecutionContext, item_id)
     tool_call_id = tool_call.get("id")
     assert isinstance(tool_call_id, str)
     tool_result_json = json.dumps(tool_result, ensure_ascii=False)
@@ -206,6 +220,16 @@ def test_run_tool_loop_executes_allowed_tool_and_returns_final_answer() -> None:
     责任边界：
         本测试只验证正常协议闭环，不覆盖非法参数、未知工具或执行异常。
     """
+    received_execution_contexts: list[ToolExecutionContext] = []
+
+    def recording_lookup_demo_item(
+        execution_context: ToolExecutionContext,
+        item_id: str,
+    ) -> dict[str, object]:
+        """记录服务端注入的执行上下文，再调用原fake业务函数。"""
+        received_execution_contexts.append(execution_context)
+        return lookup_demo_item(execution_context, item_id)
+
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
     tool_request: Message = {
         "role": "assistant",
@@ -224,7 +248,7 @@ def test_run_tool_loop_executes_allowed_tool_and_returns_final_answer() -> None:
     registry = {
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
-            handler=lookup_demo_item,
+            handler=recording_lookup_demo_item,
         )
     }
 
@@ -232,6 +256,7 @@ def test_run_tool_loop_executes_allowed_tool_and_returns_final_answer() -> None:
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopSuccess)
@@ -243,7 +268,7 @@ def test_run_tool_loop_executes_allowed_tool_and_returns_final_answer() -> None:
         "tool",
         "assistant",
     ]
-
+    assert received_execution_contexts == [FakeToolExecutionContext]
     tool_message = outcome.messages[2]
     assert tool_message["tool_call_id"] == "call_001"
 
@@ -270,6 +295,7 @@ def test_run_tool_loop_rejects_invalid_json_without_executing_tool() -> None:
     责任边界：
         本测试只覆盖JSON语法错误，不覆盖schema字段错误或工具内部异常。
     """
+
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
     tool_request: Message = {
         "role": "assistant",
@@ -298,6 +324,7 @@ def test_run_tool_loop_rejects_invalid_json_without_executing_tool() -> None:
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)
@@ -350,6 +377,7 @@ def test_run_tool_loop_rejects_arguments_that_violate_schema(
     责任边界：
         本测试只覆盖schema校验，不覆盖JSON语法错误或工具内部异常。
     """
+
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
     tool_request: Message = {
         "role": "assistant",
@@ -375,6 +403,7 @@ def test_run_tool_loop_rejects_arguments_that_violate_schema(
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)
@@ -410,6 +439,7 @@ def test_run_tool_loop_rejects_unknown_tool_without_execution() -> None:
     责任边界：
         本测试只验证registry授权边界，不覆盖参数schema或工具内部异常。
     """
+
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
     tool_request: Message = {
         "role": "assistant",
@@ -435,6 +465,7 @@ def test_run_tool_loop_rejects_unknown_tool_without_execution() -> None:
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)
@@ -477,6 +508,7 @@ def test_run_tool_loop_returns_protocol_error_when_tool_call_id_is_missing() -> 
     责任边界：
         本测试只覆盖调用ID缺失，不覆盖已有有效ID后的工具处理错误。
     """
+
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
     tool_request: Message = {
         "role": "assistant",
@@ -501,6 +533,7 @@ def test_run_tool_loop_returns_protocol_error_when_tool_call_id_is_missing() -> 
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)
@@ -537,7 +570,9 @@ def test_run_tool_loop_rejects_repeated_tool_call_id_without_reexecution() -> No
     """
     call_count = 0
 
-    def counting_lookup_demo_item(item_id: str) -> dict[str, object]:
+    def counting_lookup_demo_item(
+        execution_context: ToolExecutionContext, item_id: str
+    ) -> dict[str, object]:
         """记录fake工具执行次数并返回样品查询结果。
 
         输入：
@@ -553,7 +588,7 @@ def test_run_tool_loop_rejects_repeated_tool_call_id_without_reexecution() -> No
         """
         nonlocal call_count
         call_count += 1
-        return lookup_demo_item(item_id)
+        return lookup_demo_item(execution_context, item_id)
 
     registry = {
         "lookup_demo_item": ToolSpec(
@@ -586,6 +621,7 @@ def test_run_tool_loop_rejects_repeated_tool_call_id_without_reexecution() -> No
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)
@@ -628,7 +664,9 @@ def test_run_tool_loop_rejects_new_id_for_repeated_operation_without_reexecution
     """
     call_count = 0
 
-    def counting_lookup_demo_item(item_id: str) -> dict[str, object]:
+    def counting_lookup_demo_item(
+        execution_context: ToolExecutionContext, item_id: str
+    ) -> dict[str, object]:
         """记录fake工具执行次数并返回样品查询结果。
 
         输入：
@@ -644,7 +682,7 @@ def test_run_tool_loop_rejects_new_id_for_repeated_operation_without_reexecution
         """
         nonlocal call_count
         call_count += 1
-        return lookup_demo_item(item_id)
+        return lookup_demo_item(execution_context, item_id)
 
     registry = {
         "lookup_demo_item": ToolSpec(
@@ -690,6 +728,7 @@ def test_run_tool_loop_rejects_new_id_for_repeated_operation_without_reexecution
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)
@@ -732,6 +771,7 @@ def test_run_tool_loop_maps_tool_exception_to_safe_tool_error() -> None:
     责任边界：
         本测试只覆盖工具执行异常，不覆盖协议解析、registry或schema失败。
     """
+
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
     tool_request: Message = {
         "role": "assistant",
@@ -760,6 +800,7 @@ def test_run_tool_loop_maps_tool_exception_to_safe_tool_error() -> None:
         model=fake_model,
         messages=messages,
         registry=registry,
+        execution_context=FakeToolExecutionContext,
     )
 
     assert isinstance(outcome, LoopFailure)

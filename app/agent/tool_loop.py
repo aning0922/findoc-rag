@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping
 from pydantic import BaseModel, ValidationError
 from typing import Protocol
 
+from app.rag.retriever import SearchFilters, TrustedContext
+
 Message = dict[str, object]
 
 
@@ -320,6 +322,7 @@ class ToolSpec:
         registry命中工具名后，用于参数校验和执行的可信定义。
     正常路径：
         arguments_schema是BaseModel子类，handler是可调用对象。
+        handler会接收可信执行上下文＋schema 校验后的模型参数
     失败：
         schema不是BaseModel类型或handler不可调用时拒绝构造。
     责任边界：
@@ -441,11 +444,55 @@ def _finish_with_tool_error(
     )
 
 
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    """工具执行上下文。
+
+    输入：
+        可信上下文和搜索过滤器。
+    输出：
+        为工具执行提供可信上下文和搜索过滤器。
+    正常：
+        trusted_context是TrustedContext对象，filters是SearchFilters对象或None。
+    失败：
+        trusted_context不是TrustedContext对象或filters不是SearchFilters对象或None时拒绝构造。
+    责任边界：
+        只校验两个字段的外层类型；
+        workspace和过滤字段的内部不变量由TrustedContext和SearchFilters负责；
+        不执行认证、授权或业务工具。
+    """
+
+    trusted_context: TrustedContext
+    filters: SearchFilters | None
+
+    def __post_init__(self) -> None:
+        """校验ToolExecutionContext的边界。
+
+        输入：
+            当前ToolExecutionContext中的trusted_context和filters。
+        输出：
+            校验成功时不返回值，允许ToolExecutionContext完成构造。
+        正常路径：
+            trusted_context是TrustedContext对象，filters是SearchFilters对象或None。
+        失败：
+            trusted_context不是TrustedContext对象或filters不是SearchFilters对象或None时拒绝构造。
+        责任边界：
+            只校验两个字段的外层类型；
+            workspace和过滤字段的内部不变量由TrustedContext和SearchFilters负责；
+            不执行认证、授权或业务工具。
+        """
+        if not isinstance(self.trusted_context, TrustedContext):
+            raise TypeError("trusted_context 只能是一个TrustedContext对象")
+        if not isinstance(self.filters, SearchFilters | None):
+            raise TypeError("filters 只能是一个SearchFilters对象或None")
+
+
 def run_tool_loop(
     *,
     model: ToolCallingModel,
     messages: list[Message],
     registry: ToolRegistry,
+    execution_context: ToolExecutionContext,
 ) -> LoopOutcome:
     """运行fake单工具受控loop并返回明确终态。
 
@@ -453,6 +500,7 @@ def run_tool_loop(
         model是有限scripted fake；
         messages是应用维护的当前消息历史；
         registry是应用持有的唯一工具allowlist。
+        execution_context是工具执行上下文，ToolExecutionContext对象
     输出：
         正常最终文本形成LoopSuccess；
         协议或工具处理失败形成LoopFailure。
@@ -465,6 +513,7 @@ def run_tool_loop(
     责任边界：
         应用负责解析、allowlist、参数校验、执行、回填和终止；
         模型不能直接执行函数，也不能决定授权结果。
+        execution_context只能由应用传入
     """
     processed_call_ids: set[str] = set()
     processed_operations: set[tuple[str, str]] = set()
@@ -631,7 +680,7 @@ def run_tool_loop(
             processed_operations.add(operation_key)
 
             try:
-                output = tool_spec.handler(**validated_arguments.model_dump())
+                output = tool_spec.handler(execution_context, **validated_arguments.model_dump())
                 tool_result = ToolResult(
                     tool_call_id=tool_call.tool_call_id,
                     output=output,
