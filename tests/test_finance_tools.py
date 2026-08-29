@@ -28,6 +28,7 @@ from app.agent.tool_loop import (
     ToolSpec,
     run_tool_loop,
 )
+from app.rag.openai_compatible_llm import ModelCompletion
 from app.rag.retriever import (
     Retriever,
     SearchFilters,
@@ -145,26 +146,29 @@ def test_search_finance_docs_maps_retriever_exception_to_safe_tool_error() -> No
     }
 
     model = Mock()
-    model.complete.return_value = {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": "call_search_failure",
-                "type": "function",
-                "function": {
-                    "name": "search_finance_docs",
-                    "arguments": json.dumps(
-                        {
-                            "query": query,
-                            "top_k": top_k,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            }
-        ],
-    }
+    model.complete.return_value = ModelCompletion(
+        message={
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_search_failure",
+                    "type": "function",
+                    "function": {
+                        "name": "search_finance_docs",
+                        "arguments": json.dumps(
+                            {
+                                "query": query,
+                                "top_k": top_k,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+            ],
+        },
+        finish_reason="tool_calls",
+    )
 
     messages: list[dict[str, object]] = [{"role": "user", "content": "搜索营业收入"}]
     outcome = run_tool_loop(
@@ -276,12 +280,21 @@ def test_run_tool_loop_executes_calculation_from_shared_finance_registry() -> No
             }
         ],
     }
-    final_response = {
+    final_response: dict[str, object] = {
         "role": "assistant",
         "content": "营业收入增长率为25.00%。",
     }
     model = Mock()
-    model.complete.side_effect = [tool_request, final_response]
+    model.complete.side_effect = [
+        ModelCompletion(
+            message=tool_request,
+            finish_reason="tool_calls",
+        ),
+        ModelCompletion(
+            message=final_response,
+            finish_reason="stop",
+        ),
+    ]
     execution_context = ToolExecutionContext(
         trusted_context=TrustedContext(workspace_id="WS-A"),
         filters=SearchFilters(document_id="DOC-7"),
@@ -294,6 +307,13 @@ def test_run_tool_loop_executes_calculation_from_shared_finance_registry() -> No
         execution_context=execution_context,
     )
     assert isinstance(outcome, LoopSuccess)
+
+    (trusted_result,) = outcome.trusted_tool_results
+    assert trusted_result.tool_call_id == "call_metric_1"
+    assert trusted_result.output["value"] == "25.00"
+    assert trusted_result.output["unit"] == "PERCENT"
+    assert trusted_result.output["formula_id"] == "revenue_growth_rate_v1"
+
     assert outcome.final_answer == "营业收入增长率为25.00%。"
     assert [message["role"] for message in outcome.messages] == [
         "user",
@@ -358,7 +378,10 @@ def test_run_tool_loop_maps_untrusted_financial_source_to_safe_tool_error() -> N
     }
 
     model = Mock()
-    model.complete.return_value = tool_request
+    model.complete.return_value = ModelCompletion(
+        message=tool_request,
+        finish_reason="tool_calls",
+    )
     execution_context = ToolExecutionContext(
         trusted_context=TrustedContext(workspace_id="WS-A"),
         filters=SearchFilters(document_id="DOC-7"),
