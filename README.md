@@ -234,7 +234,7 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 - 当前只有 dense retrieval 和最小metadata过滤，没有hybrid search或rerank；v2真实schema有固定demo workspace，但旧7,451行schema仍无workspace_id，也没有完整认证或多租户系统
 - Day43已用真实bge-m3构建5,269行v2并验证document级收敛；删除与插入仍非事务原子操作，不证明生产可靠性
 - 向量相似度只表示当前向量空间中的接近程度，不验证公司、指标、数值或其他事实是否正确
-- 当前仍只有12题探索性对照；第8周P0扩展到总20题，第11周扩展到30～50题并增加未参与调试的holdout集；7,451/5,269行都只是本地规模，不是质量指标
+- 当前已冻结20题可信RAG baseline；第11周再扩展到总30～40题（50题上限）并增加未参与调试的holdout集；7,451/5,269行都只是本地规模，不是质量指标
 - legacy表格embedding text退化缺陷作为历史事实保留；v2已让标题、表头和表体进入检索text，但Q3/Q4/Q7/Q8/Q11仍未进入Top 5，后续必须另做受控检索诊断
 - runtime上传库与冻结评测库相互隔离；浏览器闭环只查询上传文档所在的`findoc_runtime_documents_v1`
 - `InProcessTaskDispatcher`不耐久；进程异常退出会使`queued/parsing/indexing`记录悬空，目前不做启动恢复或可靠队列。真实调试留下两条`indexing`记录，未伪装为ready
@@ -252,11 +252,11 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 
 1. ~~基于已验证的隔离COSINE/top-k契约，验证`app/rag`向量与chunk对齐，实现document级更新和删除收敛语义~~（Day40小样本完成）
 2. ~~完成metadata filters和可测试的Retriever接口~~（Day41完成契约与fake路径；真实workspace schema迁移后置）
-3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate~~（Day42完成）；第8周扩展到总20题P0、25题目标，第11周扩展到30～50题并增加holdout集
+3. ~~将6题学习baseline扩展为12题探索性baseline，并补齐逐题状态、metadata、延迟和陌生Gate；第8周冻结总20题可信RAG baseline~~（Day42-Day46完成）；第11周扩展到总30～40题（50题上限）并增加holdout集
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
 6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
-7. ~~增加原生Function Calling、两个可信业务工具与有限受控loop~~（Day49-51完成）；LangChain薄适配、Run/Event、可恢复工作流和人工审核按后续周次继续
+7. ~~增加原生Function Calling、两个可信业务工具、有限受控loop与LangChain工具/message薄适配~~（Day49-52完成）；Run/Event、可恢复工作流和人工审核按后续周次继续
 8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
