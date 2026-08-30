@@ -2,7 +2,7 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配、React/TypeScript 单页薄壳，以及真实OpenAI兼容Function Calling与有限受控tool loop。
+> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配、React/TypeScript 单页薄壳、真实OpenAI兼容Function Calling与有限受控tool loop，以及复用同一业务合同的LangChain工具与消息薄适配。
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
@@ -34,10 +34,11 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | RAG 控制层 | 可信终态链已实现 | `retrieve → evidence gate → context/prompt → generation → parse/citation validation → RAGResult/RefusalResult/SystemErrorResult`；非法引用 fail-closed |
 | Function Calling受控loop | 原生协议与真实适配已运行 | tools只从唯一registry/Pydantic schema生成；模型工具名、JSON、schema、可信上下文、权限、来源、重复调用和执行结果均由应用校验；默认`max_steps=4`，SDK重试关闭，每step最多1次白名单重试，五类终态明确 |
 | 财报业务工具 | 两个固定工具可运行 | `search_finance_docs`只包装既有Retriever；`calculate_financial_metric`只支持`revenue_growth_rate_v1`并从受workspace/document约束的进程内可信fixture取Decimal数值；确定性ToolResult独立保存，模型最终文本不能覆盖计算真值 |
+| LangChain工具与消息薄适配 | 项目可用L2 | 使用`langchain-core`的`AIMessage`、`ToolMessage`、`@tool`、schema转换和`StructuredTool.from_function`；两个正式工具继续复用唯一registry、schema、description、handler与服务端上下文。`bind_tools`仅有应用合同测试，不代表真实provider已接通 |
 | 上传状态链 | 单进程原型可运行 | `queued → parsing → indexing → ready/failed`；SQLite 记录和 LocalObjectStore 持久，但内存任务不耐久 |
 | 可信聊天 API 与 SSE | 可运行 | POST 请求只接受 `document_id/query`；服务端恢复 workspace 并构造 `document_id` 过滤；事件固定为 `status/final_answer/citation/usage/error/done` |
 | React/TypeScript 页面 | 最薄闭环可运行 | 上传、列表、轮询、ready 选择、问答、拒答、安全错误、答案与可验证引用；Node 24 + Vite 代理 |
-| 框架Agent / 权限 / 生产基础设施 | 计划中 | 尚未引入LangChain自动执行器、LangGraph、登录、多用户、Redis、S3、可靠队列或后台恢复；当前只有应用显式控制的原生单工具loop |
+| 框架Agent / 权限 / 生产基础设施 | 计划中 | 尚未引入LangChain自动执行器、ChatOpenAI生产路径、LangGraph、登录、多用户、Redis、S3、可靠队列或后台恢复；原生`run_tool_loop`仍是唯一受控生产基线 |
 
 “本地实验已跑通”表示作者使用本地数据完成过验证，不代表仓库已经提供可复现的公开 benchmark。
 
@@ -99,6 +100,8 @@ MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_
         → 正常/协议/工具/供应商/max_steps明确终态
 ```
 
+LangChain分支只投影工具与消息合同：`ToolSpec → StructuredTool`，服务端通过闭包注入同一个`ToolExecutionContext`并委托原handler；模型schema不包含workspace、用户、角色或授权结论。该分支没有复制业务逻辑、生产模型客户端或完整tool loop。
+
 真实工具smoke使用现有两个正式工具和`InMemoryFinancialFactRepository`固定fixture，在`max_steps=2`下以2次provider attempts完成`user→assistant→tool→assistant`，模型请求`calculate_financial_metric`，可信结果为`revenue_growth_rate_v1=25.00%`。该证据只证明真实SDK协议链和应用终止边界，不代表OCR、财报结构化抽取、持久化财务数据库或任意指标能力。
 
 Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
@@ -119,6 +122,7 @@ Day44在不重建Retriever或workspace过滤的前提下，新增供应商无关
 - Pydantic
 - PyMuPDF / pdfplumber / MinerU 输出适配
 - LangChain Text Splitters / tiktoken
+- LangChain Core 1.5.0（messages、tool schema与工具薄适配；无Agent或provider接入）
 - FlagEmbedding bge-m3
 - Milvus Lite
 - pytest
@@ -127,7 +131,7 @@ Day44在不重建Retriever或workspace过滤的前提下，新增供应商无关
 - React 19 / TypeScript / Vite
 - Node.js 24
 
-LangChain Agent、LangGraph、PostgreSQL、Redis、S3、Docker Compose 和生产级身份系统属于后续路线，不是当前已实现技术栈。
+LangChain Agent、LangChain provider集成、LangGraph、PostgreSQL、Redis、S3、Docker Compose 和生产级身份系统属于后续路线，不是当前已实现技术栈。
 
 ## 快速开始
 
@@ -157,7 +161,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前后端质量门为 `300 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 37 个源码文件通过。前端仍保持W8的6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
+当前后端质量门为 `307 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 38 个源码文件通过。Day49-52 Agent定向测试为`47 passed`。前端仍保持W8的6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
 
 ### 3. 启动可信上传与问答页面
 
@@ -208,7 +212,7 @@ app/
 ├── api/                # health、文档状态API、聊天路由与SSE适配
 ├── chat/               # 服务端可信请求准备与同步RAG的异步边界
 ├── gateway/            # 预留，尚未实现
-└── agent/              # 预留，尚未实现
+└── agent/              # 原生受控tool loop、财报工具及LangChain薄适配
 frontend/               # React/TypeScript/Vite单页薄壳与SSE流解析测试
 scripts/                # 解析、分块、Embedding 和 Milvus 实验脚本
 experiments/            # 分块、标准库向量检索与bge-m3小规模对照
