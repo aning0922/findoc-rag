@@ -363,33 +363,37 @@ class ToolSpec:
     """应用注册的可信工具定义。
 
     输入：
-        应用启动时提供的Pydantic参数schema和Python callable。
+        应用启动时提供的模型可见description、Pydantic参数schema和Python callable。
     输出：
         registry命中工具名后，用于参数校验和执行的可信定义。
     正常路径：
-        arguments_schema是BaseModel子类，handler是可调用对象。
+        description是非空模型可见说明，arguments_schema是BaseModel子类，
+        handler是可调用对象。
         handler会接收可信执行上下文＋schema 校验后的模型参数
     失败：
-        schema不是BaseModel类型或handler不可调用时拒绝构造。
+        description为空、schema不是BaseModel类型或handler不可调用时拒绝构造。
     责任边界：
-        只绑定校验规则与函数实现；不读取模型消息，
+        只绑定唯一工具说明、校验规则与函数实现；不读取模型消息，
         不决定授权，不执行loop，也不允许模型动态注册工具。
     """
 
     arguments_schema: type[BaseModel]
     handler: Callable[..., dict[str, object]]
+    description: str
 
     def __post_init__(self) -> None:
         """校验registry条目的schema和callable边界。
 
         输入：
-            当前ToolSpec中的arguments_schema和handler。
+            当前ToolSpec中的description、arguments_schema和handler。
         输出：
             校验成功时不返回值，允许可信工具定义完成构造。
         正常路径：
-            arguments_schema是BaseModel子类，handler是可调用对象。
+            description是非空字符串，arguments_schema是BaseModel子类，
+            handler是可调用对象。
         失败：
-            schema不是class、不是BaseModel子类或handler不可调用时抛出TypeError。
+            description为空、schema不是class或BaseModel子类、
+            handler不可调用时抛出TypeError或ValueError。
         责任边界：
             不实例化参数schema，不执行handler，
             也不读取或修改registry中的其他工具。
@@ -400,6 +404,10 @@ class ToolSpec:
             raise TypeError("arguments_schema 只能是BaseModel的子类")
         if not callable(self.handler):
             raise TypeError("handler 必须是可调用对象")
+        if not isinstance(self.description, str):
+            raise TypeError("description 只能是非空字符串")
+        if not self.description.strip():
+            raise ValueError("description 只能是非空字符串")
 
 
 LoopOutcome = LoopSuccess | LoopFailure
@@ -1010,7 +1018,7 @@ def build_chat_completion_tools(registry: ToolRegistry) -> list[dict[str, object
     输入：
         registry是应用持有的工具名到可信ToolSpec的唯一映射。
     输出：
-        返回只包含function类型、工具名和Pydantic参数JSON Schema的
+        返回只包含function类型、工具名、唯一description和Pydantic参数JSON Schema的
         可序列化工具定义列表。
     失败：
         Pydantic参数schema无法生成JSON Schema时向调用方传播异常。
@@ -1024,6 +1032,7 @@ def build_chat_completion_tools(registry: ToolRegistry) -> list[dict[str, object
             "function": {
                 "name": function_name,
                 "parameters": tool_spec.arguments_schema.model_json_schema(),
+                "description": tool_spec.description,
             },
         }
         for function_name, tool_spec in registry.items()

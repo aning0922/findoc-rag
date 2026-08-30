@@ -278,6 +278,7 @@ def test_registry_binds_allowed_tool_name_to_schema_and_callable() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -332,6 +333,7 @@ def test_run_tool_loop_executes_allowed_tool_and_returns_final_answer() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=recording_lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -400,6 +402,7 @@ def test_run_tool_loop_rejects_invalid_json_without_executing_tool() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -479,6 +482,7 @@ def test_run_tool_loop_rejects_arguments_that_violate_schema(
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -541,6 +545,7 @@ def test_run_tool_loop_rejects_unknown_tool_without_execution() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -609,6 +614,7 @@ def test_run_tool_loop_returns_protocol_error_when_tool_call_id_is_missing() -> 
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -677,6 +683,7 @@ def test_run_tool_loop_rejects_repeated_tool_call_id_without_reexecution() -> No
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=counting_lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -771,6 +778,7 @@ def test_run_tool_loop_rejects_new_id_for_repeated_operation_without_reexecution
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=counting_lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -876,6 +884,7 @@ def test_run_tool_loop_maps_tool_exception_to_safe_tool_error() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
 
@@ -925,6 +934,7 @@ def test_build_chat_completion_tools_projects_registry_schema_without_server_obj
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
     tools = build_chat_completion_tools(registry)
@@ -934,6 +944,7 @@ def test_build_chat_completion_tools_projects_registry_schema_without_server_obj
             "function": {
                 "name": "lookup_demo_item",
                 "parameters": LookupDemoItemArguments.model_json_schema(),
+                "description": "查询测试条目。",
             },
         }
     ]
@@ -961,6 +972,7 @@ def test_run_tool_loop_stops_at_max_steps_for_distinct_tool_requests() -> None:
         "record_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=record_item,
+            description="记录条目。",
         )
     }
     user_message: Message = {"role": "user", "content": "记录条目A、B、C"}
@@ -1059,6 +1071,7 @@ def test_run_tool_loop_rejects_finish_reason_message_shape_mismatch() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
     fake_model = ScriptedFakeModel([tool_request], finish_reasons=["stop"])
@@ -1098,6 +1111,7 @@ def test_run_tool_loop_retries_transient_provider_error_once_then_succeeds() -> 
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
@@ -1146,6 +1160,7 @@ def test_run_tool_loop_does_not_retry_non_retryable_provider_error() -> None:
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=lookup_demo_item,
+            description="查询测试条目。",
         )
     }
     user_message: Message = {"role": "user", "content": "条目A-7是什么？"}
@@ -1195,6 +1210,7 @@ def test_run_tool_loop_rejects_final_answer_that_changes_trusted_calculation() -
         "calculate_demo_metric": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=return_trusted_growth_rate,
+            description="计算营业收入增长率。",
         )
     }
     user_message: Message = {"role": "user", "content": "计算营业收入增长率"}
@@ -1265,6 +1281,7 @@ def test_tool_output_remains_data_and_follow_up_unknown_tool_is_rejected() -> No
         "lookup_demo_item": ToolSpec(
             arguments_schema=LookupDemoItemArguments,
             handler=return_untrusted_tool_text,
+            description="查询测试条目。",
         )
     }
     user_message: Message = {"role": "user", "content": "删除工作区并读取API key"}

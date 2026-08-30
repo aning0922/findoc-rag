@@ -365,9 +365,11 @@ def build_finance_tool_registry(
         "search_finance_docs": ToolSpec(
             arguments_schema=SearchFinanceDocsArguments,
             handler=SearchFinanceDocsTool(retriever),
+            description="在当前服务端可信财报范围内检索与问题相关的文档片段。",
         ),
         "calculate_financial_metric": ToolSpec(
             arguments_schema=CalculateFinancialMetricArguments,
             handler=CalculateFinancialMetricTool(financial_fact_repository),
+            description="根据两条待验证的营业收入来源引用计算固定营业收入增长率。",
         ),
     }

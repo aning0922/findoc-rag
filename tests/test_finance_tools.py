@@ -142,6 +142,7 @@ def test_search_finance_docs_maps_retriever_exception_to_safe_tool_error() -> No
         "search_finance_docs": ToolSpec(
             arguments_schema=SearchFinanceDocsArguments,
             handler=SearchFinanceDocsTool(retriever),
+            description="在当前服务端可信财报范围内检索与问题相关的文档片段。",
         )
     }
 
