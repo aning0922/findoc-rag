@@ -33,3 +33,4 @@ models/
 mineru_out/
 
 *.db
+eval/agent_results/*.sqlite3

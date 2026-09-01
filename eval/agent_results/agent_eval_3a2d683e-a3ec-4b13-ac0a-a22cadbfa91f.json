@@ -1,0 +1,202 @@
+{
+  "evaluation_run_id": "3a2d683e-a3ec-4b13-ac0a-a22cadbfa91f",
+  "execution_kind": "real_model",
+  "quality_status": "measured",
+  "quality_claim_allowed": true,
+  "created_at": "2026-09-01T12:17:37.519979+00:00",
+  "model_name": "deepseek-v4-flash",
+  "dataset_sha256": "2d7ab53bc5fafb2a295e5c4391de3b73422c7a117fe0e6687f6b5c375e88012c",
+  "schema_version": "agent_eval_case_v1",
+  "tool_schema_version": "finance_tools_v1",
+  "runner_config_version": "agent_eval_runner_v1",
+  "expected_case_count": 12,
+  "scores": {
+    "tool_selection": {
+      "correct": 9,
+      "total": 12,
+      "rate": 0.75
+    },
+    "parameters": {
+      "correct": 8,
+      "total": 13,
+      "rate": 0.6153846153846154
+    },
+    "terminal_status": {
+      "correct": 7,
+      "total": 12,
+      "rate": 0.5833333333333334
+    }
+  },
+  "results": [
+    {
+      "case_id": "agent-001",
+      "run_id": "24f1bb56-e136-4cc3-b15d-9664a82a3907",
+      "observed_tool_calls": [],
+      "observed_terminal_status": "success"
+    },
+    {
+      "case_id": "agent-002",
+      "run_id": "c1c18606-c638-428c-b336-acc7d480cbdf",
+      "observed_tool_calls": [],
+      "observed_terminal_status": "success"
+    },
+    {
+      "case_id": "agent-003",
+      "run_id": "a573a9aa-d49d-44b7-8f42-7b9bd605e59e",
+      "observed_tool_calls": [
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "2025年营业收入",
+            "top_k": 3
+          }
+        }
+      ],
+      "observed_terminal_status": "success"
+    },
+    {
+      "case_id": "agent-004",
+      "run_id": "4c8c6817-3a45-465d-a904-b880aba1cbc2",
+      "observed_tool_calls": [
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "经营活动产生的现金流量净额",
+            "top_k": 2
+          }
+        }
+      ],
+      "observed_terminal_status": "success"
+    },
+    {
+      "case_id": "agent-005",
+      "run_id": "f9ef3bee-69a6-45fd-9558-0d79cff88752",
+      "observed_tool_calls": [
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "研发费用",
+            "top_k": 1
+          }
+        }
+      ],
+      "observed_terminal_status": "success"
+    },
+    {
+      "case_id": "agent-006",
+      "run_id": "326744da-c335-483b-b7b5-fbbc329e35bb",
+      "observed_tool_calls": [
+        {
+          "tool_name": "calculate_financial_metric",
+          "arguments": {
+            "metric_id": "revenue_growth_rate",
+            "current_period_source_ref": "chunk-current",
+            "previous_period_source_ref": "chunk-previous"
+          }
+        }
+      ],
+      "observed_terminal_status": "protocol_error"
+    },
+    {
+      "case_id": "agent-007",
+      "run_id": "ff2b0261-fbbd-4f84-8bbf-75aaea57e057",
+      "observed_tool_calls": [
+        {
+          "tool_name": "calculate_financial_metric",
+          "arguments": {
+            "metric_id": "revenue_growth_rate",
+            "current_period_source_ref": "chunk-current",
+            "previous_period_source_ref": "chunk-previous"
+          }
+        }
+      ],
+      "observed_terminal_status": "success"
+    },
+    {
+      "case_id": "agent-008",
+      "run_id": "def34b0a-04d5-4aa5-92df-0b8d22c09d89",
+      "observed_tool_calls": [
+        {
+          "tool_name": "calculate_financial_metric",
+          "arguments": {
+            "metric_id": "revenue_growth_rate",
+            "current_period_source_ref": "chunk-current",
+            "previous_period_source_ref": "chunk-previous"
+          }
+        }
+      ],
+      "observed_terminal_status": "protocol_error"
+    },
+    {
+      "case_id": "agent-009",
+      "run_id": "d08ff972-3a9c-4c6e-89cc-4c35379fbadb",
+      "observed_tool_calls": [
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "2025年和2024年营业收入",
+            "top_k": 2
+          }
+        }
+      ],
+      "observed_terminal_status": "protocol_error"
+    },
+    {
+      "case_id": "agent-010",
+      "run_id": "de9fbf6e-ede6-4bca-b474-dc711bae1c2f",
+      "observed_tool_calls": [
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "本期营业收入",
+            "top_k": 2
+          }
+        },
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "上期营业收入",
+            "top_k": 2
+          }
+        }
+      ],
+      "observed_terminal_status": "protocol_error"
+    },
+    {
+      "case_id": "agent-011",
+      "run_id": "a755f04b-2b2c-4ecc-8189-c73bd3b0c6c2",
+      "observed_tool_calls": [
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "2025年营业收入",
+            "top_k": 5
+          }
+        },
+        {
+          "tool_name": "search_finance_docs",
+          "arguments": {
+            "query": "2024年营业收入",
+            "top_k": 5
+          }
+        }
+      ],
+      "observed_terminal_status": "protocol_error"
+    },
+    {
+      "case_id": "agent-012",
+      "run_id": "cab04ea0-80e9-49aa-a099-23e6c2ada6f2",
+      "observed_tool_calls": [
+        {
+          "tool_name": "calculate_financial_metric",
+          "arguments": {
+            "metric_id": "revenue_growth_rate",
+            "current_period_source_ref": "chunk-missing",
+            "previous_period_source_ref": "chunk-previous"
+          }
+        }
+      ],
+      "observed_terminal_status": "tool_error"
+    }
+  ]
+}
