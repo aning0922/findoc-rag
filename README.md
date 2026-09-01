@@ -2,7 +2,7 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配、React/TypeScript 单页薄壳、真实OpenAI兼容Function Calling与有限受控tool loop，以及复用同一业务合同的LangChain工具与消息薄适配。
+> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配、React/TypeScript 单页薄壳、真实OpenAI兼容Function Calling与有限受控tool loop、复用同一业务合同的LangChain工具与消息薄适配，以及可持久查询的Agent Run/Event与独立12题评测链。
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
@@ -35,6 +35,8 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | Function Calling受控loop | 原生协议与真实适配已运行 | tools只从唯一registry/Pydantic schema生成；模型工具名、JSON、schema、可信上下文、权限、来源、重复调用和执行结果均由应用校验；默认`max_steps=4`，SDK重试关闭，每step最多1次白名单重试，五类终态明确 |
 | 财报业务工具 | 两个固定工具可运行 | `search_finance_docs`只包装既有Retriever；`calculate_financial_metric`只支持`revenue_growth_rate_v1`并从受workspace/document约束的进程内可信fixture取Decimal数值；确定性ToolResult独立保存，模型最终文本不能覆盖计算真值 |
 | LangChain工具与消息薄适配 | 项目可用L2 | 使用`langchain-core`的`AIMessage`、`ToolMessage`、`@tool`、schema转换和`StructuredTool.from_function`；两个正式工具继续复用唯一registry、schema、description、handler与服务端上下文。`bind_tools`仅有应用合同测试，不代表真实provider已接通 |
+| Agent Run/Event | 项目可用L2 | 独立SQLite领域与repository保存按workspace隔离的Run、有序安全Event和唯一终态；终结Run与终态Event同一事务。事件是执行结束后的安全投影，不是实时流或完整Event Sourcing |
+| Agent评测 | 12题冻结基线已运行 | 独立于W8 RAG题集；工具选择、参数、终态三个scorer分别计分。真实`deepseek-v4-flash`唯一一次运行结果为75.00%、61.54%、58.33%，原始结果按唯一评测run ID保存 |
 | 上传状态链 | 单进程原型可运行 | `queued → parsing → indexing → ready/failed`；SQLite 记录和 LocalObjectStore 持久，但内存任务不耐久 |
 | 可信聊天 API 与 SSE | 可运行 | POST 请求只接受 `document_id/query`；服务端恢复 workspace 并构造 `document_id` 过滤；事件固定为 `status/final_answer/citation/usage/error/done` |
 | React/TypeScript 页面 | 最薄闭环可运行 | 上传、列表、轮询、ready 选择、问答、拒答、安全错误、答案与可验证引用；Node 24 + Vite 代理 |
@@ -102,7 +104,21 @@ MinerU 解析过程目前由仓库外部执行，本仓库只读取其 `content_
 
 LangChain分支只投影工具与消息合同：`ToolSpec → StructuredTool`，服务端通过闭包注入同一个`ToolExecutionContext`并委托原handler；模型schema不包含workspace、用户、角色或授权结论。该分支没有复制业务逻辑、生产模型客户端或完整tool loop。
 
+一次受控执行结束后，`AgentRunService`在原生loop外将安全业务事实投影到独立SQLite repository：
+
+```text
+服务端生成run_id + 注入可信workspace → 保存running Run
+        → 调用唯一run_tool_loop
+        → 从LoopOutcome/messages/trusted_tool_results提取白名单事实
+        → 同一事务写终态Event并终结Run
+        → workspace_id + run_id查询Run与有序Event
+```
+
+这里不保存system prompt、原始用户prompt、完整messages、检索全文、原始供应商响应、原始异常/traceback、密钥、base URL或隐藏CoT。错误workspace与不存在run对外采用相同not-found语义。
+
 真实工具smoke使用现有两个正式工具和`InMemoryFinancialFactRepository`固定fixture，在`max_steps=2`下以2次provider attempts完成`user→assistant→tool→assistant`，模型请求`calculate_financial_metric`，可信结果为`revenue_growth_rate_v1=25.00%`。该证据只证明真实SDK协议链和应用终止边界，不代表OCR、财报结构化抽取、持久化财务数据库或任意指标能力。
+
+冻结Agent评测集包含恰好12条任务，数据集SHA-256为`2d7ab53bc5fafb2a295e5c4391de3b73422c7a117fe0e6687f6b5c375e88012c`。2026-09-01只正式运行一次`deepseek-v4-flash`，评测run ID为`3a2d683e-a3ec-4b13-ac0a-a22cadbfa91f`：工具选择`9/12=75.00%`，参数槽位`8/13=61.54%`，终态`7/12=58.33%`。其中两题工具和参数正确但终态为`protocol_error`，证明终态指标没有被工具选择分数吞掉；另有检索后漏计算和单响应双工具调用违反当前单调用协议的badcase。结果只描述这一次冻结配置，不外推为通用模型能力，也未为调分重跑。
 
 Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
 
@@ -161,7 +177,13 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前后端质量门为 `307 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 38 个源码文件通过。Day49-52 Agent定向测试为`47 passed`。前端仍保持W8的6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
+当前后端质量门为 `327 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 45 个源码文件通过。Function Calling至Run/Event与Agent评测定向测试为`67 passed`。前端仍保持W8的6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
+
+冻结Agent评测可通过以下命令运行；每次结果使用唯一文件名，已有结果不会被覆盖：
+
+```bash
+uv run python scripts/evaluate_agent.py
+```
 
 ### 3. 启动可信上传与问答页面
 
@@ -212,14 +234,14 @@ app/
 ├── api/                # health、文档状态API、聊天路由与SSE适配
 ├── chat/               # 服务端可信请求准备与同步RAG的异步边界
 ├── gateway/            # 预留，尚未实现
-└── agent/              # 原生受控tool loop、财报工具及LangChain薄适配
+└── agent/              # 原生受控loop、财报工具、LangChain薄适配、Run/Event与Agent评测
 frontend/               # React/TypeScript/Vite单页薄壳与SSE流解析测试
 scripts/                # 解析、分块、Embedding 和 Milvus 实验脚本
 experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
 doc/                    # 解析器、分块与向量检索决策记录
 data/                   # 本地 PDF、JSONL 和 Milvus 数据，不提交
-eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评测题草稿
+eval/                   # RAG评测资产，以及独立Agent 12题/config/唯一结果
 ```
 
 当前 `scripts/` 中部分脚本仍使用作者的本地文件名，尚未整理成统一的端到端 CLI。
@@ -246,6 +268,9 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 - 当前只能证明计算`source_ref`属于服务端注入的workspace/document，不能证明一定来自同一轮之前的搜索调用
 - `trusted_tool_results`只证明结果由registry内工具实际执行产生；搜索命中的文本仍可能是不可信数据，恶意输出测试不代表彻底解决所有prompt injection
 - 最终计算文本保护只检查固定公式、`PERCENT`和ASCII `%`的严格集合匹配，不是通用自然语言事实核验器
+- Run/Event是loop完成后的安全投影，不是实时事件；进程被杀或SQLite自身故障仍可能留下`running`，当前没有租约、启动对账、崩溃恢复或多用户认证
+- 当前没有HTTP Agent Run API、前端Run时间线或事件回放；未来即使增加展示回放，也只从已保存Event重建视图，不重放模型或工具副作用
+- 后台异步执行与实时SSE属于条件重构：只有真实延迟/并发需要出现后才引入`202 + worker`、幂等领取和断线续传，不能用`async def`包装同步loop冒充后台任务
 - 当前不做token逐字直通、Prompt A/B、后台恢复、Redis/S3、多页面或复杂UI
 
 ## Roadmap
@@ -256,7 +281,7 @@ eval/                   # Day41/42 baseline、Day43 legacy/v2对照与Day44评�
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
 6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
-7. ~~增加原生Function Calling、两个可信业务工具、有限受控loop与LangChain工具/message薄适配~~（Day49-52完成）；Run/Event、可恢复工作流和人工审核按后续周次继续
+7. ~~增加原生Function Calling、两个可信业务工具、有限受控loop、LangChain工具/message薄适配、Run/Event与独立12题Agent评测~~；后续按触发条件评估HTTP Run API、展示时间线、后台执行、崩溃恢复与实时事件，可恢复工作流和人工审核仍按后续周次继续
 8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
