@@ -2,7 +2,7 @@
 
 中文财报解析与可溯源向量检索原型。
 
-> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配、React/TypeScript 单页薄壳、真实OpenAI兼容Function Calling与有限受控tool loop、复用同一业务合同的LangChain工具与消息薄适配，以及可持久查询的Agent Run/Event与独立12题评测链。
+> **项目状态：建设中。** 当前已形成相互隔离的冻结评测库与 runtime 上传库，并完成可信非流式 RAG、引用校验、双层拒答、文档状态 API、SSE 聊天适配、React/TypeScript 单页薄壳、真实OpenAI兼容Function Calling与有限受控tool loop、复用同一业务合同的LangChain工具与消息薄适配，以及可持久查询的Agent Run/Event与独立12题评测链。测试范围另有唯一陌生schema工具Gate，但它未进入生产registry。
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
@@ -37,6 +37,7 @@ FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可
 | LangChain工具与消息薄适配 | 项目可用L2 | 使用`langchain-core`的`AIMessage`、`ToolMessage`、`@tool`、schema转换和`StructuredTool.from_function`；两个正式工具继续复用唯一registry、schema、description、handler与服务端上下文。`bind_tools`仅有应用合同测试，不代表真实provider已接通 |
 | Agent Run/Event | 项目可用L2 | 独立SQLite领域与repository保存按workspace隔离的Run、有序安全Event和唯一终态；终结Run与终态Event同一事务。事件是执行结束后的安全投影，不是实时流或完整Event Sourcing |
 | Agent评测 | 12题冻结基线已运行 | 独立于W8 RAG题集；工具选择、参数、终态三个scorer分别计分。真实`deepseek-v4-flash`唯一一次运行结果为75.00%、61.54%、58.33%，原始结果按唯一评测run ID保存 |
+| W9理解Gate | 工程通过、理解未收口 | 闭卷最小loop与测试专用复核工单陌生schema已运行；本人仍不能独立解释测试局部registry与生产factory装配隔离，因此Function Calling暂保持L2，不以测试全绿晋级L3 |
 | 上传状态链 | 单进程原型可运行 | `queued → parsing → indexing → ready/failed`；SQLite 记录和 LocalObjectStore 持久，但内存任务不耐久 |
 | 可信聊天 API 与 SSE | 可运行 | POST 请求只接受 `document_id/query`；服务端恢复 workspace 并构造 `document_id` 过滤；事件固定为 `status/final_answer/citation/usage/error/done` |
 | React/TypeScript 页面 | 最薄闭环可运行 | 上传、列表、轮询、ready 选择、问答、拒答、安全错误、答案与可验证引用；Node 24 + Vite 代理 |
@@ -177,7 +178,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前后端质量门为 `327 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 45 个源码文件通过。Function Calling至Run/Event与Agent评测定向测试为`67 passed`。前端仍保持W8的6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖的行为符合契约，不替代真实检索评测、模型答案或事实正确性。
+当前后端质量门为 `330 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 45 个源码文件通过。Day49-54 Function Calling、LangChain、Run/Event、Agent评测及陌生schema定向测试为`70 passed`。前端在项目指定Node 24下保持6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖行为符合契约，不替代理解Gate、真实检索评测、模型答案或事实正确性。
 
 冻结Agent评测可通过以下命令运行；每次结果使用唯一文件名，已有结果不会被覆盖：
 
@@ -281,7 +282,7 @@ eval/                   # RAG评测资产，以及独立Agent 12题/config/唯�
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
 6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
-7. ~~增加原生Function Calling、两个可信业务工具、有限受控loop、LangChain工具/message薄适配、Run/Event与独立12题Agent评测~~；后续按触发条件评估HTTP Run API、展示时间线、后台执行、崩溃恢复与实时事件，可恢复工作流和人工审核仍按后续周次继续
+7. ~~增加原生Function Calling、两个可信业务工具、有限受控loop、LangChain工具/message薄适配、Run/Event、独立12题Agent评测与一个测试专用陌生schema工程Gate~~；Function Calling理解等级因registry装配隔离口述P0暂保持L2。Day55投递不延期；后续按触发条件评估HTTP Run API、展示时间线、后台执行、崩溃恢复与实时事件
 8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
