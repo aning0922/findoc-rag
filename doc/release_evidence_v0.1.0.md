@@ -81,7 +81,28 @@ git diff --check
 通过，无输出。
 ```
 
-上述 `331 passed` 使用作者本地冻结数据，只证明修改后默认全量在当前作者环境通过；它不是修复后 candidate 的 clean-clone 证据。candidate 隔离复测完成前，不宣称公开 clone 已通过默认全量。
+上述 `331 passed` 使用作者本地冻结数据，只证明修改后默认全量在当前作者环境通过；它不是修复后 candidate 的隔离证据。candidate 的无私有数据复测单独记录如下。
+
+提交后隔离 candidate 复测：
+
+```text
+来源：从本地已提交Git对象执行 --no-local --depth 1 隔离克隆；不是远端复测。
+commit: e7d0176f04f353b58990747ce35511b6fe3ff2b9
+工作树：干净
+data/day43_data_v2：不存在
+
+uv sync --frozen
+成功：按锁文件安装 175 个包。
+
+uv run pytest tests/test_trusted_rag_questions.py -q -rs
+1 passed, 1 skipped in 11.61s
+skip原因明确给出缺失目录和 -m local_data 显式运行命令。
+
+uv run pytest -q
+330 passed, 1 skipped, 5 warnings in 48.66s
+```
+
+该结果证明 `e7d0176` 的已提交文件在没有作者私有 chunks 时可以完成默认后端测试，并保留可见的本地数据核验 skip；它不替代 Day59 的真正远端 candidate 复核。
 
 本地数据交叉核验的前置条件与显式入口：
 
