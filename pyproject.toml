@@ -48,3 +48,8 @@ untyped_calls_exclude = ["pymupdf"]
 [[tool.mypy.overrides]]
 module = ["pymilvus", "pymilvus.*", "FlagEmbedding", "FlagEmbedding.*"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+markers = [
+    "local_data: 依赖本地未纳入仓库的数据",
+]
