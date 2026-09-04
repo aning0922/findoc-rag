@@ -106,12 +106,16 @@ def _build_runtime_indexer(
     return index_document
 
 
-def _build_runtime_rag_resources(database_path: Path, collection_name: str) -> RuntimeRAGResources:
+def _build_runtime_rag_resources(
+    database_path: Path,
+    collection_name: str,
+    llm_client: OpenAICompatibleLLMClient,
+) -> RuntimeRAGResources:
     """组装只查询runtime collection的可信RAG及Milvus资源。
 
-    输入：runtime Milvus Lite路径和上传文档专用collection名称。
+    输入：runtime Milvus Lite路径、上传文档专用collection名称和已验证的LLM客户端。
     输出：包含RAGService和打开状态MilvusClient的资源对象。
-    失败：LLM配置、Milvus连接或依赖构造失败时关闭client并原样抛出。
+    失败：Milvus连接或RAG依赖构造失败时关闭client并原样抛出。
     边界：启动时只确保并加载runtime collection，不写入文档数据，
     也不访问冻结collection。
     """
@@ -123,7 +127,6 @@ def _build_runtime_rag_resources(database_path: Path, collection_name: str) -> R
         store = MilvusSearchStore(client, collection_name)
         retriever = Retriever(_runtime_bge_embed, store)
         evidence_gate = ConservativeScoreEvidenceGate(min_top_score=RUNTIME_MIN_TOP_SCORE)
-        llm_client: OpenAICompatibleLLMClient = OpenAICompatibleLLMClient.from_env()
         rag_service = RAGService(
             retriever=retriever,
             llm_client=llm_client,
@@ -155,6 +158,8 @@ def create_runtime_app(
         SQLite记录可跨重启保存，但dispatcher任务只存在于当前进程内；
         本函数今天不扫描或恢复悬空任务。
     """
+    # 必需LLM配置是启动前置条件：配置不完整时不得触碰模型、磁盘或Milvus。
+    llm_client = OpenAICompatibleLLMClient.from_env()
     # BGE可能在首次加载时触发子进程初始化，必须先于Milvus/gRPC客户端。
     _warm_runtime_bge_before_milvus()
     repository = SQLiteDocumentRepository(
@@ -186,7 +191,7 @@ def create_runtime_app(
         workspace_id=DEMO_WORKSPACE_ID,
     )
     rag_resources = _build_runtime_rag_resources(
-        runtime_root / "milvus.db", RUNTIME_COLLECTION_NAME
+        runtime_root / "milvus.db", RUNTIME_COLLECTION_NAME, llm_client
     )
     chat_service = ChatService(
         document_service=document_service,
