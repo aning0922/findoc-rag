@@ -129,3 +129,62 @@ uv run pytest -q
 | clean-clone 默认验证 | 仅公开远端 tracked files；无 `.env`、私有 PDF、作者 chunks、Milvus DB 或模型缓存 | 锁文件安装合同、公开离线单测/契约测试、前端测试与构建可复现 | 真实 RAG 质量、真实模型调用、本地 5,269 行数据或 runtime Demo 可复跑 |
 | 作者本地 integration/eval | 冻结 PDF 派生数据、manifest、Milvus collection、模型与密钥 | 指定数据和配置上的检索、RAG、Agent 历史结果及题集—chunks 交叉核验 | 新用户仅 clone 即可复跑；结果可外推到任意财报或任意模型 |
 | runtime Demo | 有效 LLM 配置、bge-m3、本地 runtime 库和可分发合成 PDF | 上传 → ready → 回答/引用 → 拒答的可见产品链 | 生产部署、在线 Demo、认证、多用户隔离或可靠后台任务 |
+
+## Holdout 冻结身份与首次入口失败
+
+冻结身份：
+
+```text
+代码 candidate commit: cf2610b8dd265b85054562d89b74f3de0f18782a
+题集封存 commit: 3e1aea832b0580e6e1b18184de53e7ddd2b54a1f
+runner: scripts/evaluate_trusted_rag.py
+runner SHA-256: e445a43ff1e5f0846174f41515d4cb7b8a0606ef55b3e3db742f6f6238997665
+描述性 baseline config SHA-256: 7c1361987141a4178c53ffbc6f2b8b580fa72a497043ccc46bcc800e0bcb5e09
+data manifest SHA-256: 06bba7db22db4ea7cde485b1695be624ba7aaf91f3150562b5044390af008e59
+suite SHA-256: 2ffde40665008b5dc0af99de5118b702be2500e7ffddaf9890d0d2492e3bd507
+holdout manifest SHA-256: 7c2b0b4aecf5ed43118f17768b676671dece4433ee5a551c38cab86be060ae06
+数据身份: day43_data_v2 / demo-financial-reports / data/milvus.db
+collection: findoc_day43_v2 / 5,269 rows / COSINE
+embedding: BAAI/bge-m3 / 1,024 dimensions
+实际参数: top_k=5 / min_top_score=0.55 / max_evidence_chars=4000
+Prompt版本: trusted-rag-json-v1
+LLM: deepseek-v4-flash / https://api.deepseek.com / timeout=30s
+密钥: 仅确认运行环境中存在；未读取或保存内容
+```
+
+题集包含恰好 5 题，聚合分布为 3 条可回答、2 条不可回答。正式运行前只核对
+manifest 摘要、schema、数量和 SHA-256，不打开题集正文；这是程序性封存，
+不是访问控制意义上的物理隔离。
+
+2026-09-05 首次使用计划中的文件路径入口启动：
+
+```text
+uv run python scripts/evaluate_trusted_rag.py \
+  --questions eval/trusted_rag_holdout_v1.jsonl \
+  --output eval/trusted_rag_holdout_result_cff75a4b-d202-438c-ac40-5c7957c88a08.json
+
+退出状态: 失败
+错误: ModuleNotFoundError: No module named 'app'
+失败位置: scripts/evaluate_trusted_rag.py 第16行模块导入
+main()是否进入: 否
+题集是否加载: 否
+case开始数: 0
+Milvus与模型是否调用: 否
+结果文件是否产生: 否
+```
+
+根因是文件路径入口把 `scripts/` 作为模块搜索起点，无法解析仓库根目录下的
+`app` 包；已有 baseline config 记录的执行入口为
+`python -m scripts.evaluate_trusted_rag`。原冻结规则只明确允许 API 或数据库初始化
+故障后的唯一重试，没有覆盖 `main()` 之前的入口命令失败。由于本次未加载题集、
+未进入任何 case、未调用模型且未产生结果，人工决定透明记录该规则偏差，并只允许
+一次模块入口修正；不得借此修改代码、题集、Prompt、阈值、模型或数据。
+
+唯一入口修正身份：
+
+```text
+run-id: 1d6b709d-d91d-4398-a2e1-58c45565466c
+output: eval/trusted_rag_holdout_result_1d6b709d-d91d-4398-a2e1-58c45565466c.json
+入口: uv run python -m scripts.evaluate_trusted_rag
+后续启动上限: 1
+```
