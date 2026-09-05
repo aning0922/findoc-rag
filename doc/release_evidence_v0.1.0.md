@@ -188,3 +188,27 @@ output: eval/trusted_rag_holdout_result_1d6b709d-d91d-4398-a2e1-58c45565466c.jso
 入口: uv run python -m scripts.evaluate_trusted_rag
 后续启动上限: 1
 ```
+
+唯一入口修正运行已于 2026-09-05 完成，未再次运行：
+
+```text
+执行HEAD: f75398afff586f950a405c8a30ba07753324e17b
+运行时工作树: clean
+run-id: 1d6b709d-d91d-4398-a2e1-58c45565466c
+result: eval/trusted_rag_holdout_result_1d6b709d-d91d-4398-a2e1-58c45565466c.json
+result SHA-256: b3a18ff6920664fac5eb018da10db274a58346ec49d07623376201521355717b
+题集SHA-256: 2ffde40665008b5dc0af99de5118b702be2500e7ffddaf9890d0d2492e3bd507
+数据manifest SHA-256: 06bba7db22db4ea7cde485b1695be624ba7aaf91f3150562b5044390af008e59
+结果数: 5
+终态分布: answered=3 / refusal=2 / system_error=0
+预期可回答题分母: 3；终态answered=3 / refusal=0
+预期不可回答题分母: 2；终态refusal=2 / answered=0
+协议级有效引用终态: 3
+受控入口修正: 1次
+修正后额外运行: 0次
+```
+
+以上只完成原始结果的存在性、唯一命名、分母、终态、system error 和身份完整性
+检查。`answered` 不等于事实正确，协议级引用有效只表示引用编号可以映射到本次检索
+证据，不表示证据一定支持答案；逐题事实与引用核对留到开封评分阶段。5 题从本次运行
+起已成为揭示的一次性 release smoke，不再称为未见 holdout，也不用于运行后调参重跑。
