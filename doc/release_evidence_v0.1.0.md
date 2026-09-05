@@ -117,9 +117,11 @@ uv run pytest -q
 
 ```text
 实际必需配置：LLM_API_KEY、LLM_MODEL、LLM_BASE_URL、LLM_TIMEOUT_SECONDS。
-当前初始化顺序：BGE warmup → SQLite repository / object store → Milvus client 与 collection → 读取 LLM 配置。
-影响：缺少 LLM 配置时仍会先加载 BGE；若 warmup 成功，还会创建 data/runtime、documents.db、objects/ 与 Milvus 数据库/collection，随后才因配置失败。Milvus client 会在异常处理中关闭，但已创建的落盘状态不会回滚。
-下一步：若今日不超过硬停止线，后续最小 fail-fast 必须由自动测试证明配置失败时 BGE warmup 未调用、Milvus client 未创建且 data/runtime 未产生半初始化状态；否则作为 Day56 第一块处理。
+原风险顺序：BGE warmup → SQLite repository / object store → Milvus client 与 collection → 读取 LLM 配置。
+修复后顺序：读取并校验 LLM 配置 → BGE warmup → SQLite repository / object store → Milvus client 与 collection。
+配置实现：`cf2610b8dd265b85054562d89b74f3de0f18782a`；已验证的同一 LLM client 注入 RAG 资源，不再在 Milvus 创建后重复读取环境。
+自动证据：缺少 LLM_API_KEY 时调用记录严格为 `["config"]`；临时 runtime 下 `documents.db`、`objects` 和 `milvus.db` 均不存在。本人定向测试为1 passed，组合配置定向测试为6 passed；Ruff、`mypy app`与diff检查通过。
+剩余边界：`app.api.main`仍采用模块导入即装配；本次只覆盖代表性缺配置路径，不扩成统一Settings平台。
 ```
 
 ## 三层验证边界
