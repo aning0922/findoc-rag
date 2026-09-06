@@ -6,6 +6,8 @@
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
+Agent 的真实装配尚未实现；[单文档任务合同](doc/decisions.md#agent-单文档任务合同装配前约定)已明确服务端范围、仅检索的初始工具清单、用户结果三态与执行预算。合同是后续实现的输入，不代表计算、用户结果校验或结果持久化已接通。
+
 ## 项目目标
 
 FinDoc RAG 面向包含长文本和复杂表格的企业财报，探索一条可验证的 RAG 工程链路：
@@ -119,7 +121,9 @@ LangChain分支只投影工具与消息合同：`ToolSpec → StructuredTool`，
 
 真实工具smoke使用现有两个正式工具和`InMemoryFinancialFactRepository`固定fixture，在`max_steps=2`下以2次provider attempts完成`user→assistant→tool→assistant`，模型请求`calculate_financial_metric`，可信结果为`revenue_growth_rate_v1=25.00%`。该证据只证明真实SDK协议链和应用终止边界，不代表OCR、财报结构化抽取、持久化财务数据库或任意指标能力。
 
-冻结Agent评测集包含恰好12条任务，数据集SHA-256为`2d7ab53bc5fafb2a295e5c4391de3b73422c7a117fe0e6687f6b5c375e88012c`。2026-09-01只正式运行一次`deepseek-v4-flash`，评测run ID为`3a2d683e-a3ec-4b13-ac0a-a22cadbfa91f`：工具选择`9/12=75.00%`，参数槽位`8/13=61.54%`，终态`7/12=58.33%`。其中两题工具和参数正确但终态为`protocol_error`，证明终态指标没有被工具选择分数吞掉；另有检索后漏计算和单响应双工具调用违反当前单调用协议的badcase。结果只描述这一次冻结配置，不外推为通用模型能力，也未为调分重跑。
+冻结Agent评测集包含恰好12条任务，数据集SHA-256为`2d7ab53bc5fafb2a295e5c4391de3b73422c7a117fe0e6687f6b5c375e88012c`。2026-09-01只正式运行一次`deepseek-v4-flash`，评测run ID为`3a2d683e-a3ec-4b13-ac0a-a22cadbfa91f`：工具选择`9/12=75.00%`，参数槽位`8/13=61.54%`，终态`7/12=58.33%`。原评分保持不变。该运行使用固定检索样例与有限内存事实库，不能证明上传文档后的真实 Agent 工具链已接通。已有记录能区分调用申请、部分工具执行结果及运行终态，但未保存完整回答及响应轮次边界，不能确认历史 `protocol_error` 的具体触发分支，也不能断言两次申请来自单次响应。详见[固定结果归因与证据限制](eval/agent_results/agent_eval_3a2d683e-a3ec-4b13-ac0a-a22cadbfa91f_analysis.md)。
+
+固定五题 release smoke 的既有结果经人工核对：事实正确且引用支持 `3/3`、正确拒答 `2/2`、system error `0/5`。这只是该固定样本与配置的观察，不是泛化准确率；合法引用编号也不自动证明语义支持。原始运行身份、逐题依据与限制见[发布证据](doc/release_evidence_v0.1.0.md)。
 
 Day39另外使用Python标准库完成了一条隔离的`query vector → COSINE → 稳定排序 → top-k`链路，并用bge-m3做了5条候选和1条查询的小规模黑盒对照，未使用Milvus或7,451块数据。契约、预测误差和职责边界见[Day39向量检索决策记录](doc/vector_retrieval.md)。
 
@@ -164,7 +168,37 @@ uv sync
 
 依赖包含文档解析和本地 Embedding 组件，首次安装及首次下载 bge-m3 可能耗时较长。
 
-### 2. 运行解析 smoke test
+### 2. 生成公开合成 PDF 并检查解析
+
+复用项目已有 PyMuPDF 依赖生成两页中文资料，不需要私有 PDF、模型调用、向量库或服务：
+
+```bash
+uv run python scripts/generate_demo_pdf.py
+# 可选：--output artifacts/demo/another_demo.pdf
+```
+
+默认路径相对于当前目录，为 `artifacts/demo/synthetic_finance_demo.pdf`。文件或目录重名时保留原内容，尝试 `_v2`、`_v3` 等后缀，终端打印实际保存路径。后缀仅避免重名，不代表内容版本。默认目录下的生成 PDF 已被 Git 忽略，可从生成器重建。
+
+每页标注“完全虚构，仅用于软件演示”，并嵌入中文字体。固定事实为：
+
+| 页码 | 虚构企业甲的披露内容 |
+|---|---|
+| 1 | 2025年度营业收入120万元；2024年度营业收入100万元 |
+| 2 | 2025年末员工人数12人；未提供员工年龄信息 |
+
+资料支持直接查问上述收入和人数；员工平均年龄缺少依据，应拒答。这里约定的是资料边界，尚未用该 PDF 验证模型回答或拒答表现，也未接通真实计算事实确认链。
+
+可用现有 `parse_pdf(path, backend="fast")` 读取终端打印的实际路径；返回块的 `page` 从1开始，`source_file` 保留传入路径。上传解析适配器则恢复逻辑文件名。重复生成保证固定事实、页码和文本一致，不承诺 PDF 字节哈希相同。
+
+```bash
+uv run pytest tests/test_parse.py tests/test_demo_pdf.py -q
+```
+
+专用检查会解析实际新生成的 PDF，验证数字、单位、两页合成标记、页码和两条解析路径的来源映射，比较重复生成的解析内容，并检查重名文件不被覆盖。本演示使用正文文本，不证明任意财报、扫描件或复杂表格能被准确解析或回答。
+
+2026-09-06 本地验证：上述定向检查为 `3 passed`（另有5条底层SWIG弃用警告）；实际生成的最终文件另经 fast parser、上传解析适配器和 Poppler 两页渲染核对，关键文本、单位、页码、来源映射及显示正常。未为此调用模型、运行RAG/Agent评测或修改向量库。
+
+原有解析 smoke 也可单独运行：
 
 这个测试会临时生成一份小型 PDF，不需要下载年报：
 
@@ -178,7 +212,7 @@ uv run pytest tests/test_parse.py -q
 uv run pytest -q
 ```
 
-当前后端质量门为 `330 passed`，只有 5 条底层 SWIG 弃用警告；Ruff 通过，`mypy app`检查 45 个源码文件通过。Day49-54 Function Calling、LangChain、Run/Event、Agent评测及陌生schema定向测试为`70 passed`。前端在项目指定Node 24下保持6个流协议测试、TypeScript/Vite build和oxlint证据。测试全绿只表示已覆盖行为符合契约，不替代理解Gate、真实检索评测、模型答案或事实正确性。
+历史后端测试曾为 `330 passed`；首次公开 clean clone 暴露私有数据依赖，修复后无私有数据的隔离 candidate 为 `330 passed, 1 skipped`，作者含本地数据的检查为 `331 passed`。历史工具调用相关定向测试为 `70 passed`；另有 Ruff、`mypy app`（45个源码文件）、前端6项测试及 Node 24下构建和 lint 证据。各版本与环境身份见[发布证据](doc/release_evidence_v0.1.0.md)，不将这些历史结果称为当前 HEAD 的全量质量门。测试只证明已覆盖行为，不替代真实检索、答案事实或引用语义核验。
 
 冻结Agent评测可通过以下命令运行；每次结果使用唯一文件名，已有结果不会被覆盖：
 
@@ -282,7 +316,7 @@ eval/                   # RAG评测资产，以及独立Agent 12题/config/唯�
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
 6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
-7. ~~增加原生Function Calling、两个可信业务工具、有限受控loop、LangChain工具/message薄适配、Run/Event、独立12题Agent评测与一个测试专用陌生schema工程Gate~~；Function Calling理解等级因registry装配隔离口述P0暂保持L2。Day55投递不延期；后续按触发条件评估HTTP Run API、展示时间线、后台执行、崩溃恢复与实时事件
+7. ~~增加原生Function Calling、两个财报工具、有限受控loop、LangChain工具/message薄适配、Run/Event及独立12题Agent评测~~；后续实现真实 Agent runtime 装配、用户结果与引用验证、结果持久化及 HTTP Run API。后台执行、崩溃恢复与实时事件仍为后续能力
 8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。

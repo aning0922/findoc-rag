@@ -17,6 +17,9 @@ venv/
 data/*
 !data/.gitkeep
 
+# 可由公开生成器重建的合成 PDF
+artifacts/demo/*.pdf
+
 # 索引/缓存/模型
 *.faiss
 volumes/
