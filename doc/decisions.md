@@ -128,3 +128,14 @@
 | A为本次核准且ready的合成文档；询问2025年度营业收入 | 仅检索A；若取得对应证据并通过结果校验，回答120万元并引用第1页。即使任务文字声称有B的权限，也不扩大到B；输入文档本身未通过前置校验则不启动执行 | PDF文本与页码已验证；服务端绑定规则已有RAG实现，Agent装配和结果验证待实现 |
 | 要求计算该文档的2025年度营业收入增长率 | 当前工具清单只有检索，返回能力范围限制的拒答；不读取评测预置数值，不把模型计算当工具真值 | 计算函数已有实现，真实PDF到可信事实库的链路尚缺；不因两个年度数字可见就开放计算 |
 | 询问该文档员工平均年龄 | 正常取得的证据不足则拒答；检索超时则系统错误。第4步后仍未完成则保留max_steps_reached，不能继续第5步或冒充正常拒答 | 三态与失败映射是待实施合同；现有loop已有步骤终止和失败分类，不能据此声称用户结果接口已完成 |
+
+### runtime 内核装配实现记录（2026-09-07）
+
+以上保留装配前合同和静态情景检查。现已增加 [AgentRuntimeService](../app/agent/runtime.py)：在已装配应用对象上调用 `await app.state.agent_service.run(document_id=..., query=...)`，先通过共享 [DocumentTaskPreparer](../app/documents/preparation.py) 查证文档，再调用既有 `AgentRunService.execute`。Chat 也使用同一准备组件；归属真值仍由 `DocumentService.get_document` 提供。输入非法、文档不存在/越界/非 ready 或缺失单文档过滤，均在模型、工具及 Run 创建之前失败。
+
+- [composition root](../app/api/main.py) 显式提供 RAG 已创建的同一个 Retriever，复用 `findoc_runtime_documents_v1`、现有 Milvus 检索连接及关闭处理、同一个 OpenAI 兼容客户端。新增 Run/Event 库为 runtime 根目录下的 `agent-runs.db`；必需配置仍先于 BGE、SQLite、对象目录和 Milvus 初始化。后续装配失败时关闭已创建的检索连接。
+- `build_search_finance_tool_registry` 每次构造仅含搜索工具的独立表，复用既有 schema/handler；旧双工具 factory 复用该构造后再加入计算，保留离线行为。模型只能填写 `query/top_k`，核准范围从服务端准备结果进入 `ToolExecutionContext`，不从任务或资料文字恢复。runtime 不读取评测 fixture 或计算事实库。
+- 服务端固定 `max_steps=4`，不增加总结轮；每步供应商重试和请求 timeout 沿用原合同。内部入口的文档准备是异步，后续 loop 和 Run 持久化同步占用调用线程；尚未接 HTTP 线程适配、后台执行或强制取消。
+- 返回值仍为 `RecordedRunOutcome`，持久化内容仍是既有 Run/Event 安全摘要。loop success 和候选文本不等于已验证用户答案；计算能力限制的用户拒答映射、用户三态/引用验证、用户结果与终态同事务持久化、HTTP/UI 均待后续实现。
+
+定向验证：`test_agent_runtime`、`test_runtime_startup`、`test_agent_run_service`、`test_finance_tools`、`test_document_preparation`、`test_chat_service`、`test_chat_api`、`test_sse` 共 **68 passed**，另有 5 条 SWIG 弃用警告；改动相关 Ruff、5 个相关源码文件 mypy 与 diff 检查通过。正式装配测试使用假模型/embedding/Milvus/文档存储、真实 Retriever/工具/loop/文档服务和临时 SQLite，覆盖资源复用、范围前置失败、单工具 schema、越权参数、步骤/重试边界及旧聊天回归。这些是接线和边界证据；未运行真实 Agent 依赖 smoke、付费模型、历史评测或向量重建，历史评分及原始资产保持不变。

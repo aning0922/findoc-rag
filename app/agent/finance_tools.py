@@ -342,6 +342,23 @@ class CalculateFinancialMetricTool:
         }
 
 
+def build_search_finance_tool_registry(*, retriever: Retriever) -> dict[str, ToolSpec]:
+    """用传入的检索器构造独立的单工具注册表，供真实 runtime 使用。
+
+    输入：应用已创建的 Retriever，不在此初始化模型、向量库或事实库。
+    输出：只有 search_finance_docs 的新字典，复用既有 schema 和 handler。
+    失败：ToolSpec 构造错误向装配入口传播；构造不执行检索。
+    边界：不注册计算工具，不读取评测样例或单次请求的授权范围。
+    """
+    return {
+        "search_finance_docs": ToolSpec(
+            arguments_schema=SearchFinanceDocsArguments,
+            handler=SearchFinanceDocsTool(retriever),
+            description="在当前服务端可信财报范围内检索与问题相关的文档片段。",
+        ),
+    }
+
+
 def build_finance_tool_registry(
     *,
     retriever: Retriever,
@@ -361,15 +378,10 @@ def build_finance_tool_registry(
         只负责依赖装配和工具注册，不读取模型消息、
         不创建单次请求的可信上下文，也不执行搜索或计算。
     """
-    return {
-        "search_finance_docs": ToolSpec(
-            arguments_schema=SearchFinanceDocsArguments,
-            handler=SearchFinanceDocsTool(retriever),
-            description="在当前服务端可信财报范围内检索与问题相关的文档片段。",
-        ),
-        "calculate_financial_metric": ToolSpec(
-            arguments_schema=CalculateFinancialMetricArguments,
-            handler=CalculateFinancialMetricTool(financial_fact_repository),
-            description="根据两条待验证的营业收入来源引用计算固定营业收入增长率。",
-        ),
-    }
+    registry = build_search_finance_tool_registry(retriever=retriever)
+    registry["calculate_financial_metric"] = ToolSpec(
+        arguments_schema=CalculateFinancialMetricArguments,
+        handler=CalculateFinancialMetricTool(financial_fact_repository),
+        description="根据两条待验证的营业收入来源引用计算固定营业收入增长率。",
+    )
+    return registry

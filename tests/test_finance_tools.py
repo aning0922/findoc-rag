@@ -10,6 +10,7 @@ from app.agent.finance_tools import (
     SearchFinanceDocsArguments,
     SearchFinanceDocsTool,
     build_finance_tool_registry,
+    build_search_finance_tool_registry,
 )
 
 from app.agent.financial_facts import (
@@ -47,7 +48,7 @@ def test_search_arguments_normalizes_query_and_uses_default_top_k() -> None:
 
 def test_search_arguments_rejects_model_workspace_override() -> None:
     """验证模型提交workspace_id时被严格schema拒绝。"""
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as _:
         SearchFinanceDocsArguments.model_validate(
             {
                 "query": "营业收入",
@@ -229,6 +230,21 @@ def test_build_finance_tool_registry_registers_only_allowed_business_tools() -> 
         registry["calculate_financial_metric"].handler,
         CalculateFinancialMetricTool,
     )
+
+
+def test_search_registry_instances_are_isolated_from_two_tool_factory() -> None:
+    """修改一个局部表不改变其他实例或旧双工具表，搜索仍复用同一 schema/handler 类型。"""
+    retriever = Mock(spec=Retriever)
+    runtime_registry = build_search_finance_tool_registry(retriever=retriever)
+    local_registry = build_search_finance_tool_registry(retriever=retriever)
+    offline_registry = build_finance_tool_registry(
+        retriever=retriever, financial_fact_repository=Mock(spec=FinancialFactRepository)
+    )
+    local_registry.clear()
+    assert set(runtime_registry) == {"search_finance_docs"}
+    assert set(offline_registry) == {"search_finance_docs", "calculate_financial_metric"}
+    assert runtime_registry["search_finance_docs"].arguments_schema is SearchFinanceDocsArguments
+    assert isinstance(runtime_registry["search_finance_docs"].handler, SearchFinanceDocsTool)
 
 
 def test_run_tool_loop_executes_calculation_from_shared_finance_registry() -> None:

@@ -6,11 +6,15 @@ from typing import Any
 from fastapi import FastAPI
 from pymilvus import MilvusClient
 
+from app.agent.run_service import AgentRunService
+from app.agent.runtime import AgentRuntimeService, RUNTIME_AGENT_CONFIG_VERSION
+from app.agent.sqlite_run_repository import SQLiteAgentRunRepository
 from app.api.app import create_app
 from app.chat.service import ChatService
 from app.documents.fast_pdf_parser import parse_fast_pdf_bytes
 from app.documents.in_process_dispatcher import InProcessTaskDispatcher
 from app.documents.local_object_store import LocalObjectStore
+from app.documents.preparation import DocumentTaskPreparer
 from app.documents.processor import DocumentProcessor
 from app.documents.service import DocumentService
 from app.documents.sqlite_repository import SQLiteDocumentRepository
@@ -34,7 +38,7 @@ RUNTIME_MAX_EVIDENCE_CHARS = 4000
 
 @dataclass(frozen=True)
 class RuntimeRAGResources:
-    """保存runtime可信RAG服务及其长生命周期Milvus连接。
+    """保存 runtime 可信 RAG、共享 Retriever 及其长生命周期 Milvus 连接。
 
     输入：已完成依赖组装的RAGService和仍处于打开状态的MilvusClient。
     输出：供应用注入聊天服务，并在应用关闭时释放Milvus连接。
@@ -42,7 +46,11 @@ class RuntimeRAGResources:
     """
 
     rag_service: RAGService
+    """现有聊天使用的可信 RAG 服务。"""
+    retriever: Retriever
+    """与 RAG 使用同一实例的检索器，供 Agent 搜索工具复用。"""
     milvus_client: MilvusClient
+    """由应用关闭处理释放的同一个检索连接。"""
 
 
 def _runtime_bge_embed(texts: list[str]) -> list[list[float]]:
@@ -139,6 +147,7 @@ def _build_runtime_rag_resources(
 
     return RuntimeRAGResources(
         rag_service=rag_service,
+        retriever=retriever,
         milvus_client=client,
     )
 
@@ -146,7 +155,7 @@ def _build_runtime_rag_resources(
 def create_runtime_app(
     runtime_root: Path = DEFAULT_RUNTIME_ROOT,
 ) -> FastAPI:
-    """组装单进程文档上传应用及其独立runtime基础设施。
+    """组装文档/RAG 应用及单文档 Agent 内核，复用同一 runtime 检索资源。
 
     Args:
         runtime_root: SQLite、对象文件和runtime Milvus的内部根目录。
@@ -193,16 +202,30 @@ def create_runtime_app(
     rag_resources = _build_runtime_rag_resources(
         runtime_root / "milvus.db", RUNTIME_COLLECTION_NAME, llm_client
     )
-    chat_service = ChatService(
-        document_service=document_service,
-        rag_service=rag_resources.rag_service,
-    )
-    app = create_app(document_service, chat_service=chat_service)
-    app.state.runtime_rag_resources = rag_resources
-    app.add_event_handler(
-        "shutdown",
-        rag_resources.milvus_client.close,
-    )
+    try:
+        document_preparer = DocumentTaskPreparer(document_service=document_service)
+        chat_service = ChatService(
+            document_preparer=document_preparer,
+            rag_service=rag_resources.rag_service,
+        )
+        agent_repository = SQLiteAgentRunRepository(runtime_root / "agent-runs.db")
+        agent_service = AgentRuntimeService(
+            document_preparer=document_preparer,
+            retriever=rag_resources.retriever,
+            model=llm_client,
+            run_service=AgentRunService(
+                repository=agent_repository,
+                execution_config_version=RUNTIME_AGENT_CONFIG_VERSION,
+            ),
+        )
+        app = create_app(document_service, chat_service=chat_service)
+        app.state.runtime_rag_resources = rag_resources
+        # 仅提供内部运行入口；尚未注册 Agent HTTP 路由或用户结果发布能力。
+        app.state.agent_service = agent_service
+        app.add_event_handler("shutdown", rag_resources.milvus_client.close)
+    except Exception:
+        rag_resources.milvus_client.close()
+        raise
     return app
 
 

@@ -6,6 +6,7 @@ import pytest
 
 from app.chat.service import ChatService, DocumentNotReadyError, PreparedChat
 from app.documents.models import DocumentNotFoundError, DocumentRecord, DocumentStatus
+from app.documents.preparation import DocumentTaskPreparer
 from app.rag.retriever import SearchFilters, TrustedContext
 from app.rag.service import RAGOutcome, RefusalReason, RefusalResult
 
@@ -100,7 +101,7 @@ def test_prepare_preserves_document_not_found_without_calling_rag() -> None:
 
     async def scenario() -> None:
         chat_service = ChatService(
-            document_service=MissingDocumentService(),
+            document_preparer=DocumentTaskPreparer(document_service=MissingDocumentService()),
             rag_service=MustNotCallRAG(),
         )
         with pytest.raises(DocumentNotFoundError):
@@ -121,7 +122,7 @@ def test_prepare_rejects_non_ready_document_without_calling_rag() -> None:
         record = make_document_record(DocumentStatus.INDEXING)
         document_service = StaticDocumentService(record=record)
         chat_service = ChatService(
-            document_service=document_service,
+            document_preparer=DocumentTaskPreparer(document_service=document_service),
             rag_service=MustNotCallRAG(),
         )
         with pytest.raises(DocumentNotReadyError):
@@ -143,7 +144,7 @@ def test_prepare_builds_trusted_inputs_from_server_record() -> None:
         record = make_document_record(DocumentStatus.READY)
         document_service = StaticDocumentService(record)
         chat_service = ChatService(
-            document_service=document_service,
+            document_preparer=DocumentTaskPreparer(document_service=document_service),
             rag_service=MustNotCallRAG(),
         )
         prepared = await chat_service.prepare(
@@ -175,7 +176,9 @@ def test_answer_forwards_prepared_input_and_returns_rag_outcome() -> None:
         )
         rag_service = SpyRAG(expected_outcome)
         chat_service = ChatService(
-            document_service=StaticDocumentService(make_document_record(DocumentStatus.READY)),
+            document_preparer=DocumentTaskPreparer(
+                document_service=StaticDocumentService(make_document_record(DocumentStatus.READY))
+            ),
             rag_service=rag_service,
         )
         prepared = PreparedChat(
@@ -213,7 +216,9 @@ def test_answer_runs_synchronous_rag_in_worker_thread() -> None:
         )
         rag_service = SpyRAG(expected_outcome)
         chat_service = ChatService(
-            document_service=StaticDocumentService(make_document_record(DocumentStatus.READY)),
+            document_preparer=DocumentTaskPreparer(
+                document_service=StaticDocumentService(make_document_record(DocumentStatus.READY))
+            ),
             rag_service=rag_service,
         )
         prepared = PreparedChat(

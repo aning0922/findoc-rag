@@ -26,6 +26,7 @@ def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
     calls: list[str] = []
     fail_config = False
 
+    from app.agent import sqlite_run_repository
     from app.documents import local_object_store, sqlite_repository
     from app.rag import openai_compatible_llm, store
 
@@ -40,6 +41,13 @@ def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
 
         def __init__(self, root: Path) -> None:
             calls.append("object_store")
+
+    class RecordingAgentRepository:
+        """记录 Run 库初始化，避免模块级装配写入真实 runtime 数据。"""
+
+        def __init__(self, database_path: Path) -> None:
+            """只记录构造动作，不创建 SQLite 文件。"""
+            calls.append("agent_sqlite")
 
     def fake_from_env(cls: object) -> object:
         """先允许模块级应用装配，再让目标调用模拟缺少API key。"""
@@ -67,6 +75,7 @@ def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
     monkeypatch.setitem(sys.modules, "app.rag.embed", fake_embed_module)
     monkeypatch.setattr(sqlite_repository, "SQLiteDocumentRepository", RecordingRepository)
     monkeypatch.setattr(local_object_store, "LocalObjectStore", RecordingObjectStore)
+    monkeypatch.setattr(sqlite_run_repository, "SQLiteAgentRunRepository", RecordingAgentRepository)
     monkeypatch.setattr(
         openai_compatible_llm.OpenAICompatibleLLMClient,
         "from_env",
@@ -98,6 +107,7 @@ def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
             runtime_root / "documents.db",
             runtime_root / "objects",
             runtime_root / "milvus.db",
+            runtime_root / "agent-runs.db",
         )
         created_runtime_paths = [path for path in unexpected_runtime_paths if path.exists()]
 

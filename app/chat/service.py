@@ -1,23 +1,16 @@
 import asyncio
-from dataclasses import dataclass
 from typing import Protocol
 
-from app.documents.models import DocumentRecord, DocumentStatus
+from app.documents.preparation import (
+    DocumentNotReadyError as DocumentNotReadyError,
+    DocumentTaskPreparer,
+    PreparedDocumentTask,
+)
 from app.rag.retriever import SearchFilters, TrustedContext
 from app.rag.service import RAGOutcome
 
-
-class DocumentReader(Protocol):
-    """定义聊天准备阶段所需的最小文档读取能力。
-
-    输入：服务端收到的document_id。
-    输出：属于固定workspace的DocumentRecord。
-    失败：文档不存在或不属于固定workspace时抛出DocumentNotFoundError。
-    """
-
-    async def get_document(self, document_id: str) -> DocumentRecord:
-        """读取当前固定workspace中的一条文档记录。"""
-        ...
+# 保留聊天层原有公开类型名；它与共享准备结果是同一个类型，没有复制校验逻辑。
+PreparedChat = PreparedDocumentTask
 
 
 class RAGAnswerer(Protocol):
@@ -39,36 +32,14 @@ class RAGAnswerer(Protocol):
         ...
 
 
-class DocumentNotReadyError(RuntimeError):
-    """文档存在且属于当前 workspace，但状态不是 ready"""
-
-
-@dataclass(frozen=True)
-class PreparedChat:
-    """服务端准备完成的不可变聊天输入，保存 query、可信 context 和服务端过滤条件"""
-
-    query: str
-    context: TrustedContext
-    filters: SearchFilters | None = None
-
-    def __post_init__(self) -> None:
-        """校验 query 和 context 非空；filters 类型正确"""
-        if not isinstance(self.query, str) or not self.query.strip():
-            raise ValueError("query 必须是非空字符串")
-        if not isinstance(self.context, TrustedContext):
-            raise TypeError("context 必须是 TrustedContext")
-        if self.filters is not None and not isinstance(self.filters, SearchFilters):
-            raise TypeError("filters 必须是 SearchFilters 或 None")
-
-
 class ChatService:
     """负责前置检查和调用同步 RAGService，不负责 SSE framing 或终态事件映射"""
 
-    def __init__(self, *, document_service: DocumentReader, rag_service: RAGAnswerer) -> None:
-        """保存服务端文档读取依赖和同步可信RAG依赖。
+    def __init__(self, *, document_preparer: DocumentTaskPreparer, rag_service: RAGAnswerer) -> None:
+        """保存共享文档准备组件和同步可信RAG依赖。
 
         Args:
-            document_service: 固定workspace的文档读取器。
+            document_preparer: 使用固定workspace文档服务的共享准备组件。
             rag_service: 同步RAG执行器。
 
         Returns:
@@ -76,7 +47,7 @@ class ChatService:
 
         边界：构造阶段不查询文档，也不调用RAG。
         """
-        self._document_service = document_service
+        self._document_preparer = document_preparer
         self._rag_service = rag_service
 
     async def prepare(self, *, document_id: str, query: str) -> PreparedChat:
@@ -93,14 +64,7 @@ class ChatService:
         DocumentNotReadyError，输入非法时保留PreparedChat校验异常。
         边界：workspace和document_id过滤都从服务端DocumentRecord恢复。
         """
-        document = await self._document_service.get_document(document_id)
-        if document.status != DocumentStatus.READY:
-            raise DocumentNotReadyError(f"文档 {document_id} 状态不是 ready")
-        return PreparedChat(
-            query=query,
-            context=TrustedContext(workspace_id=document.workspace_id),
-            filters=SearchFilters(document_id=document.document_id),
-        )
+        return await self._document_preparer.prepare(document_id=document_id, query=query)
 
     async def answer(self, prepared: PreparedChat) -> RAGOutcome:
         """执行一次聊天请求。
