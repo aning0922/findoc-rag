@@ -276,7 +276,9 @@ class RefusalResult:
             raise TypeError("reason 必须是 RefusalReason")
 
 
-def _parse_model_output(raw_output: str) -> _ParsedModelOutput:
+def _parse_model_output(
+    raw_output: str, *, reject_duplicate_keys: bool = False
+) -> _ParsedModelOutput:
     """严格解析唯一模型 JSON 协议。
 
     Args:
@@ -294,7 +296,9 @@ def _parse_model_output(raw_output: str) -> _ParsedModelOutput:
         本函数不自动修复输出、不解析 Markdown、不校验引用，也不构造领域终态。
     """
     try:
-        parsed_output = json.loads(raw_output)
+        parsed_output = json.loads(
+            raw_output, object_pairs_hook=_unique_json_object if reject_duplicate_keys else None
+        )
     except json.JSONDecodeError as exc:
         raise _ModelProtocolError(f"模型返回了非法 JSON: {exc}") from exc
     if parsed_output is None:
@@ -321,6 +325,33 @@ def _parse_model_output(raw_output: str) -> _ParsedModelOutput:
         if not isinstance(content, str) or not content.strip():
             raise _ModelProtocolError("answer.content 必须是非空字符串")
         return _ModelAnswer(content=content)
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """保留 JSON 对象的唯一字段；重复字段抛出协议错误，不采用最后一个值。"""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _ModelProtocolError("候选对象不能包含重复字段")
+        result[key] = value
+    return result
+
+
+def parse_answer_candidate(raw_output: str) -> str | None:
+    """复用回答协议解析，不生成答案、不判断业务拒答。
+
+    输入：loop 返回的候选 JSON 文本。
+    输出：answer 返回待验证正文；refuse 返回 None，仅代表模型的拒答声明。
+    失败：结构、多余或重复字段非法时抛出安全 ValueError，不附带候选原文。
+    边界：既有 RAG 入口保留原解析行为；此入口额外拒绝重复 JSON 字段。
+    """
+    if not isinstance(raw_output, str):
+        raise ValueError("候选输出必须是 JSON 文本")
+    try:
+        candidate = _parse_model_output(raw_output, reject_duplicate_keys=True)
+    except (_ModelProtocolError, RecursionError):
+        raise ValueError("候选输出不符合回答协议") from None
+    return candidate.content if isinstance(candidate, _ModelAnswer) else None
 
 
 class EvidenceGate(Protocol):

@@ -72,6 +72,10 @@ class SearchHit:
     type: Literal["paragraph", "table", "title"]
     section: str = ""
     table_md: str | None = None
+    workspace_id: str | None = None
+    """可选的实际命中身份；旧检索兼容缺省，Agent 结果验证要求存在并匹配。"""
+    document_id: str | None = None
+    """来自 store 实体的文档 ID，不从过滤条件或正文补造。"""
 
 
 class SearchStore(Protocol):
@@ -161,6 +165,11 @@ class Retriever:
         table_md = raw_hit.get("table_md")
         if table_md is not None and not isinstance(table_md, str):
             raise RetrieverDataError("store hit 的 table_md 必须是字符串或 None")
+        workspace_id = raw_hit.get("workspace_id")
+        document_id = raw_hit.get("document_id")
+        for identity in (workspace_id, document_id):
+            if identity is not None and (not isinstance(identity, str) or not identity.strip()):
+                raise RetrieverDataError("store hit 的范围身份必须是非空字符串或 None")
         return SearchHit(
             score=float(score),
             chunk_id=raw_hit["chunk_id"],
@@ -170,6 +179,8 @@ class Retriever:
             type=validated_type,
             section=section,
             table_md=table_md,
+            workspace_id=workspace_id,
+            document_id=document_id,
         )
 
     @staticmethod

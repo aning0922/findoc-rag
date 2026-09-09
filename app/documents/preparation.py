@@ -35,6 +35,8 @@ class PreparedDocumentTask:
     """从已查证记录恢复的 workspace。"""
     filters: SearchFilters | None = None
     """服务端过滤条件；共享准备入口始终设置唯一 document_id。"""
+    source_file: str | None = None
+    """核准记录中的逻辑文件名；供 Agent 交叉核对证据，不替代 document_id。"""
 
     def __post_init__(self) -> None:
         """保留原聊天输入校验；不把类型检查当作归属或 ready 查证。"""
@@ -44,6 +46,10 @@ class PreparedDocumentTask:
             raise TypeError("context 必须是 TrustedContext")
         if self.filters is not None and not isinstance(self.filters, SearchFilters):
             raise TypeError("filters 必须是 SearchFilters 或 None")
+        if self.source_file is not None and (
+            not isinstance(self.source_file, str) or not self.source_file.strip()
+        ):
+            raise ValueError("source_file 必须是非空字符串或 None")
 
 
 class DocumentTaskPreparer:
@@ -68,4 +74,5 @@ class DocumentTaskPreparer:
             query=query,
             context=TrustedContext(workspace_id=document.workspace_id),
             filters=SearchFilters(document_id=document.document_id),
+            source_file=document.source_file,
         )

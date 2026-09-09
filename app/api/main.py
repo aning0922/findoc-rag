@@ -132,7 +132,7 @@ def _build_runtime_rag_resources(
         ensure_document_collection(client, collection_name)
         client.load_collection(collection_name=collection_name)
 
-        store = MilvusSearchStore(client, collection_name)
+        store = MilvusSearchStore(client, collection_name, include_scope_metadata=True)
         retriever = Retriever(_runtime_bge_embed, store)
         evidence_gate = ConservativeScoreEvidenceGate(min_top_score=RUNTIME_MIN_TOP_SCORE)
         rag_service = RAGService(

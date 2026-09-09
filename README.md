@@ -6,7 +6,7 @@
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
-Agent 内核已接入 runtime 依赖装配：复用上传库的 Retriever 与模型客户端，服务端查证单文档后只开放 `search_finance_docs`。当前证据来自替换重依赖的正式装配测试，尚未运行这条 Agent 链的真实依赖 smoke；计算、用户结果/引用校验、用户结果持久化和 HTTP/UI 仍未接通。范围与证据见[单文档任务合同及装配记录](doc/decisions.md#agent-单文档任务合同装配前约定)。
+Agent 已接入 runtime 并可返回经过引用验证的内存用户结果：复用上传库的 Retriever 与模型客户端，服务端查证单文档后只开放 `search_finance_docs`。当前请求限定为 `查询{四位年份}年度{指标}`，指标仅含营业收入、净利润、员工平均年龄；结果区分回答、可核证拒答与安全系统错误。证据来自假模型及替换重依赖的正式装配测试，尚未运行这条 Agent 链的真实依赖 smoke；计算、用户结果持久化和 HTTP/UI 尚未接通。范围与证据见[单文档任务合同及实现记录](doc/decisions.md#agent-单文档任务合同装配前约定)。
 
 ## 项目目标
 
@@ -316,7 +316,7 @@ eval/                   # RAG评测资产，以及独立Agent 12题/config/唯�
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
 6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
-7. ~~增加原生Function Calling、两个财报工具、有限受控loop、LangChain工具/message薄适配、Run/Event及独立12题Agent评测~~；已补充仅检索的 Agent runtime 内核装配及离线边界测试，后续实现用户结果与引用验证、结果持久化及 HTTP Run API。后台执行、崩溃恢复与实时事件仍为后续能力
+7. ~~增加原生Function Calling、两个财报工具、有限受控loop、LangChain工具/message薄适配、Run/Event及独立12题Agent评测~~；已补充仅检索的 Agent runtime、内存用户三态与引用验证及离线边界测试，后续实现用户结果持久化及 HTTP Run API。后台执行、崩溃恢复与实时事件仍为后续能力
 8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。

@@ -139,3 +139,18 @@
 - 返回值仍为 `RecordedRunOutcome`，持久化内容仍是既有 Run/Event 安全摘要。loop success 和候选文本不等于已验证用户答案；计算能力限制的用户拒答映射、用户三态/引用验证、用户结果与终态同事务持久化、HTTP/UI 均待后续实现。
 
 定向验证：`test_agent_runtime`、`test_runtime_startup`、`test_agent_run_service`、`test_finance_tools`、`test_document_preparation`、`test_chat_service`、`test_chat_api`、`test_sse` 共 **68 passed**，另有 5 条 SWIG 弃用警告；改动相关 Ruff、5 个相关源码文件 mypy 与 diff 检查通过。正式装配测试使用假模型/embedding/Milvus/文档存储、真实 Retriever/工具/loop/文档服务和临时 SQLite，覆盖资源复用、范围前置失败、单工具 schema、越权参数、步骤/重试边界及旧聊天回归。这些是接线和边界证据；未运行真实 Agent 依赖 smoke、付费模型、历史评测或向量重建，历史评分及原始资产保持不变。
+
+### 内存用户结果与引用验证（2026-09-09）
+
+本节收窄当前支持请求并记录结果验证实现；上文保留原合同与装配时点的事实。
+
+- 输入仍只有 `document_id/query`。文档归属、ready 及单文档范围先于 Run；准备组件另保留记录中的文件名供交叉检查。当前仅完整匹配 `查询[0-9]{4}年度(营业收入|净利润|员工平均年龄)`，只忽略首尾空白，不忽略附加命令。支持某指标不证明文档含有该事实。其他表达均视为当前任务合同外，不宣称识别了任意自然语言意图，也不把所有未匹配请求称为计算请求。
+- 候选沿用 RAG 的唯一 JSON 形状：`{"decision":"answer","content":"正文[n]"}` 或 `{"decision":"refuse"}`。新公开纯函数 `parse_answer_candidate` 复用原解析并额外拒绝重复字段；旧 RAG 解析和拒答路径保留。模型不能提交引用元数据、正式原因或额外字段。方括号在 Agent 候选正文中专用于无前导零的正整数引用。
+- 每个 runtime 调用新建 `SearchEvidenceSession`，包装既有唯一搜索 handler。命中范围身份来自 store 实体：runtime 的 Milvus adapter 显式请求 `workspace_id/document_id`，Retriever 与工具保留实际返回值；旧 adapter 默认字段集合及旧离线命中缺省行为兼容。Agent 严格检查字段类型、计数、empty、核准 workspace/document/file；身份缺失时失败，不从过滤条件、文件名或模型内容补造文档身份。
+- 每次搜索成功验证后向工具结果加入 `evidence_number`，编号按本次首次出现顺序递增。同一 chunk 重复出现复用编号，允许相关分数变化；正文、页码、来源或其他事实字段冲突时失败。整个返回验证通过才签发；本次结果快照与 loop 的 `trusted_tool_results` 按序核对，防止普通 messages、伪造结果或可变字典覆盖成为证据。之后构建 `NumberedContext` 并复用 `validate_and_build_citations`，引用非空、编号有效且来源属于本次核准证据才发布正文。
+- 产品 `answered` 仅公开 `status/content/citations`；引用仅含 `number/source_file/page/chunk_id`。`refusal` 仅公开 `status/reason/message`；`system_error` 仅公开 `status/error_code/message`。说明由服务端生成，三态均不公开原始 messages、检索全文、内部指令、原始异常或校验失败的候选正文。对外字段由 `user_result.to_public()` 显式生成，不序列化整个运行对象。
+- 证据不足拒答仅接受正常 loop 的 `refuse` 候选，且至少一次可信搜索、全部有效且为空。非空证据下仅有模型拒答声明返回 `unverified_refusal` 系统错误；这是可用性的保守限制，不表示非空结果必然足够。任务合同外的 `refuse` 候选可据服务端完整匹配结果形成 `capability_limit`；不执行搜索。此路径仍经过既有 loop，模型违约输出、强行调用工具或执行失败仍返回系统错误，不能用能力拒答覆盖失败。
+- `AgentRuntimeService.run` 返回 `ValidatedRunOutcome`，继承原 `RecordedRunOutcome`，保留 `.run/.outcome` 并增加 `.user_result`。Run/Event 仍只记录 loop 终态和安全摘要，因此 loop 的 `success` 可能对应产品 `system_error`。用户结果只存在于本次调用内存中，不能刷新恢复；没有结果表、数据库迁移、用户结果终态事务或 HTTP/UI。既有 Run 存储异常仍按原接口传播，不伪造已经保存的用户结果。
+- 保留单工具、四轮上限及配置 fail-fast；配置版本为 `runtime-search-result-v1`。不运行第二条 RAG 或模型生成链、不补检索、不注册计算。来源与编号校验不证明自然语言结论得到原文支持，语义质量仍需独立评测与人工核对。
+
+验证命令：`uv run --frozen pytest tests/test_agent_user_result.py tests/test_agent_runtime.py tests/test_agent_run_service.py tests/test_finance_tools.py tests/test_document_preparation.py tests/test_evidence_gate.py tests/test_day45_rag_service.py tests/test_day46_rag_service.py tests/test_day41_retriever.py tests/test_chat_service.py tests/test_chat_api.py tests/test_sse.py tests/test_runtime_startup.py -q`：**183 passed、5 条 SWIG 弃用警告**。相关 Ruff、9 个源码文件 mypy 和 diff 检查通过。新用例覆盖非法/跨范围引用、同名跨文档身份、字段与来源冲突、全空/混合搜索、伪造证据、跨 Run 编号隔离、四类 loop 失败及白名单；正式装配替换重依赖、使用临时 SQLite。仅证明代码合同与装配边界，未执行付费模型、真实 Agent smoke、历史评测或向量库重建。

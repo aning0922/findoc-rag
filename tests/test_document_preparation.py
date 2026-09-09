@@ -77,6 +77,7 @@ def test_shared_preparation_uses_document_service_scope_and_ready_boundary(
             assert prepared.query == query
             assert prepared.context == TrustedContext(workspace_id="demo")
             assert prepared.filters == SearchFilters(document_id="server-doc")
+            assert prepared.source_file == "test.pdf"
 
     asyncio.run(scenario())
     assert repository.mock_calls == [call.get("lookup-key")]

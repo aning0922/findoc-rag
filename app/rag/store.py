@@ -11,10 +11,13 @@ DIM = 1024
 class MilvusSearchStore:
     """将 MilvusClient 适配为 Retriever 所需的 SearchStore 接口"""
 
-    def __init__(self, client: MilvusClient, collection_name: str) -> None:
-        """绑定 Milvus client 和目标 collection"""
+    def __init__(
+        self, client: MilvusClient, collection_name: str, *, include_scope_metadata: bool = False
+    ) -> None:
+        """绑定既有客户端；runtime 显式请求实体身份，旧 collection 保留原字段集合。"""
         self._client = client
         self._collection_name = collection_name
+        self._include_scope_metadata = include_scope_metadata
 
     def search(
         self,
@@ -37,7 +40,7 @@ class MilvusSearchStore:
                 "chunk_id",
                 "type",
                 "table_md",
-            ],
+            ] + (["workspace_id", "document_id"] if self._include_scope_metadata else []),
         )
         return [
             {

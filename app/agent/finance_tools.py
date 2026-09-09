@@ -93,7 +93,7 @@ def _search_hit_to_output(hit: SearchHit) -> dict[str, object]:
     责任边界：
         不使用asdict自动扩大公开合同，不修改命中内容，也不生成引用真值。
     """
-    return {
+    output: dict[str, object] = {
         "score": hit.score,
         "chunk_id": hit.chunk_id,
         "text": hit.text,
@@ -103,6 +103,12 @@ def _search_hit_to_output(hit: SearchHit) -> dict[str, object]:
         "section": hit.section,
         "table_md": hit.table_md,
     }
+    # 只保留 Retriever 实际返回的身份；旧离线路径缺省时不得从上下文补造。
+    if hit.workspace_id is not None:
+        output["workspace_id"] = hit.workspace_id
+    if hit.document_id is not None:
+        output["document_id"] = hit.document_id
+    return output
 
 
 class SearchFinanceDocsTool:
