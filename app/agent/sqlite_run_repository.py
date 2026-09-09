@@ -5,6 +5,16 @@ from uuid import uuid4
 from pathlib import Path
 import sqlite3
 
+from app.agent.result_storage import (
+    USER_RESULT_VERSION,
+    AgentResultIntegrityError,
+    AgentResultNotReadyError,
+    AgentResultNotStoredError,
+    StoredAgentUserResult,
+    decode_user_result,
+    encode_user_result,
+)
+from app.agent.user_result import AgentAnswer, AgentRefusal, AgentSystemError, AgentUserResult
 from app.agent.run_models import (
     AgentRun,
     AgentRunNotFoundError,
@@ -43,6 +53,7 @@ class SQLiteAgentRunRepository:
         """
         with closing(self._connect()) as connection:
             with connection:
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS agent_runs (
@@ -125,21 +136,48 @@ class SQLiteAgentRunRepository:
                     """
                 )
 
-    def start_run(self, *, workspace_id: str, execution_config_version: str) -> AgentRun:
-        """创建并持久化一条由服务端生成身份的运行中 Agent Run。"""
+                # 只做非破坏性扩展；旧行保持 NULL，不回填不存在的产品结果。
+                columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(agent_runs)")
+                }
+                for column in ("document_id", "user_result_version"):
+                    if column not in columns:
+                        connection.execute(f"ALTER TABLE agent_runs ADD COLUMN {column} TEXT")
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_user_results (
+                        run_id TEXT PRIMARY KEY REFERENCES agent_runs(run_id),
+                        payload_json TEXT NOT NULL
+                    )
+                    """
+                )
+
+    def start_run(
+        self, *, workspace_id: str, execution_config_version: str,
+        document_id: str | None = None, user_result_version: str | None = None,
+    ) -> AgentRun:
+        """创建运行中 Run；产品路径须传核准文档及已知版本，非法输入不落盘。"""
         run_id = str(uuid4())
         status = RunStatus.RUNNING
         terminal_status = None
         started_at = datetime.now(UTC)
         ended_at = None
         safe_result = None
+        if user_result_version is not None and user_result_version != USER_RESULT_VERSION:
+            raise ValueError("不支持的用户结果版本")
+        run = AgentRun(
+            run_id=run_id, workspace_id=workspace_id, status=status,
+            terminal_status=terminal_status, started_at=started_at, ended_at=ended_at,
+            safe_result=safe_result, execution_config_version=execution_config_version,
+            document_id=document_id, user_result_version=user_result_version,
+        )
 
         with closing(self._connect()) as connection:
             with connection:
                 connection.execute(
                     """
-                    INSERT INTO agent_runs (run_id, workspace_id, status, terminal_status, started_at, ended_at, safe_result_json, execution_config_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO agent_runs (run_id, workspace_id, status, terminal_status, started_at, ended_at, safe_result_json, execution_config_version, document_id, user_result_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -150,18 +188,11 @@ class SQLiteAgentRunRepository:
                         ended_at,
                         safe_result,
                         execution_config_version,
+                        document_id,
+                        user_result_version,
                     ),
                 )
-                return AgentRun(
-                    run_id=run_id,
-                    workspace_id=workspace_id,
-                    status=status,
-                    terminal_status=terminal_status,
-                    started_at=started_at,
-                    ended_at=ended_at,
-                    safe_result=safe_result,
-                    execution_config_version=execution_config_version,
-                )
+                return run
 
     def _row_to_run(self, row: sqlite3.Row) -> AgentRun:
         """把 SQLite 行恢复为 AgentRun 领域对象。"""
@@ -180,6 +211,8 @@ class SQLiteAgentRunRepository:
                 else json.loads(str(row["safe_result_json"]))
             ),
             execution_config_version=row["execution_config_version"],
+            document_id=row["document_id"],
+            user_result_version=row["user_result_version"],
         )
 
     def get_run(self, *, workspace_id: str, run_id: str) -> AgentRun | None:
@@ -302,8 +335,13 @@ class SQLiteAgentRunRepository:
         terminal_status: AgentTerminalStatus,
         safe_result: dict[str, object] | None,
         terminal_event: RunEvent,
+        user_result: AgentUserResult | None = None,
     ) -> AgentRun:
-        """在同一事务中写入终态 Event 并终结 Agent Run。"""
+        """原子保存产品结果（若约定）、唯一结束事件和执行终态。
+
+        输入的产品结果必须已在本次证据会话验证；此处检查结构及层级一致性。
+        已终结时一律状态冲突；任一步失败向上传播，事务回滚，不重跑模型。
+        """
         if not isinstance(terminal_status, AgentTerminalStatus):
             raise TypeError("terminal_status 必须是 AgentTerminalStatus")
 
@@ -343,6 +381,18 @@ class SQLiteAgentRunRepository:
                 if RunStatus(str(run_row["status"])) is not RunStatus.RUNNING:
                     raise AgentRunStateConflictError("Agent Run 已经终结")
 
+                version = run_row["user_result_version"]
+                if version is None:
+                    if user_result is not None:
+                        raise AgentRunStateConflictError("此 Run 未约定产品结果持久化")
+                elif version != USER_RESULT_VERSION or user_result is None:
+                    raise AgentResultIntegrityError("新版本 Run 必须原子保存受支持的产品结果")
+                if user_result is not None:
+                    self._check_product_terminal(
+                        result=user_result, terminal_status=terminal_status,
+                        payload=terminal_event.payload, safe_result=safe_result,
+                    )
+
                 sequence_row = connection.execute(
                     """
                     SELECT COALESCE(MAX(sequence), 0)
@@ -368,9 +418,16 @@ class SQLiteAgentRunRepository:
                     ended_at=terminal_event.occurred_at,
                     safe_result=safe_result,
                     execution_config_version=str(run_row["execution_config_version"]),
+                    document_id=run_row["document_id"],
+                    user_result_version=version,
                 )
 
-                # 终态 Event 与下面的 Run 更新共享当前事务。
+                # 三项共享当前连接/事务；不允许 INSERT OR REPLACE 覆盖历史结果。
+                if user_result is not None:
+                    connection.execute(
+                        "INSERT INTO agent_user_results (run_id, payload_json) VALUES (?, ?)",
+                        (final_run.run_id, encode_user_result(user_result)),
+                    )
                 connection.execute(
                     """
                     INSERT INTO run_events (
@@ -417,3 +474,91 @@ class SQLiteAgentRunRepository:
                     raise AgentRunStateConflictError("Agent Run 无法原子终结")
 
         return final_run
+
+    @staticmethod
+    def _check_product_terminal(
+        *, result: AgentUserResult, terminal_status: AgentTerminalStatus,
+        payload: dict[str, object], safe_result: dict[str, object] | None,
+    ) -> None:
+        """核对执行失败映射和两处产品摘要；拒绝用执行 success 冒充 answered。"""
+        if type(result) not in (AgentAnswer, AgentRefusal, AgentSystemError):
+            raise AgentResultIntegrityError("不支持的用户结果类型")
+        if (
+            payload.get("terminal_status") != terminal_status.value
+            or payload.get("user_result_status") != result.status
+            or safe_result is None
+            or safe_result.get("user_result_status") != result.status
+        ):
+            raise AgentResultIntegrityError("用户结果与终态摘要不一致")
+        loop_errors = {"protocol_error", "tool_error", "provider_error", "max_steps_reached"}
+        if terminal_status is not AgentTerminalStatus.SUCCESS:
+            if (
+                not isinstance(result, AgentSystemError)
+                or result.error_code.value != terminal_status.value
+            ):
+                raise AgentResultIntegrityError("执行失败必须对应同类产品系统错误")
+        elif isinstance(result, AgentSystemError) and result.error_code.value in loop_errors:
+            raise AgentResultIntegrityError("正常执行不能映射为执行层错误")
+
+    def get_user_result(self, *, workspace_id: str, run_id: str) -> StoredAgentUserResult:
+        """先按可信范围查 Run，再在同一读快照恢复受限结果；不调用模型或检索。
+
+        不存在与错误 workspace 同为 not-found；运行中、旧版未存、新版不一致
+        分别抛 NotReady、NotStored、Integrity 异常，不返回候选或损坏载荷。
+        """
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute("BEGIN")
+                row = connection.execute(
+                    "SELECT * FROM agent_runs WHERE workspace_id = ? AND run_id = ?",
+                    (workspace_id, run_id),
+                ).fetchone()
+                if row is None:
+                    raise AgentRunNotFoundError("Agent Run 不存在")
+                result_row = connection.execute(
+                    "SELECT payload_json FROM agent_user_results WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                try:
+                    run = self._row_to_run(row)
+                    if run.status is RunStatus.RUNNING:
+                        if result_row is not None:
+                            raise AgentResultIntegrityError("运行中的 Run 含有终态结果")
+                        raise AgentResultNotReadyError("用户结果尚未提交")
+                    if run.user_result_version is None:
+                        if result_row is not None:
+                            raise AgentResultIntegrityError("旧版 Run 含有未约定的产品结果")
+                        raise AgentResultNotStoredError("此旧版或离线记录未保存产品结果")
+                    if result_row is None or run.document_id is None:
+                        raise AgentResultIntegrityError("已终结的新版本 Run 缺少产品结果")
+                    result = decode_user_result(
+                        result_row["payload_json"], version=run.user_result_version,
+                    )
+                    events = connection.execute(
+                        """SELECT * FROM run_events WHERE run_id = ?
+                        AND event_type IN ('run_succeeded', 'run_failed')""", (run_id,),
+                    ).fetchall()
+                    if len(events) != 1 or run.terminal_status is None:
+                        raise AgentResultIntegrityError("产品结果缺少唯一结束事件")
+                    event = self._row_to_event(events[0])
+                    last_sequence = connection.execute(
+                        "SELECT MAX(sequence) FROM run_events WHERE run_id = ?", (run_id,),
+                    ).fetchone()[0]
+                    expected_type = (
+                        RunEventType.RUN_SUCCEEDED if run.status is RunStatus.SUCCEEDED
+                        else RunEventType.RUN_FAILED
+                    )
+                    if (event.event_type is not expected_type or event.occurred_at != run.ended_at
+                            or event.sequence != last_sequence):
+                        raise AgentResultIntegrityError("Run 与结束事件不一致")
+                    self._check_product_terminal(
+                        result=result, terminal_status=run.terminal_status,
+                        payload=event.payload, safe_result=run.safe_result,
+                    )
+                    return StoredAgentUserResult(
+                        run_id=run.run_id, workspace_id=run.workspace_id,
+                        document_id=run.document_id,
+                        execution_config_version=run.execution_config_version,
+                        result_version=run.user_result_version, user_result=result,
+                    )
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    raise AgentResultIntegrityError("已保存的用户结果或终态记录不合法") from None

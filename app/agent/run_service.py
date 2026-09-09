@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+from collections.abc import Callable
 import json
 from datetime import UTC, datetime
 from app.agent.run_models import AgentRun, AgentTerminalStatus, RunEvent, RunEventType
 from app.agent.sqlite_run_repository import SQLiteAgentRunRepository
+from app.agent.result_storage import USER_RESULT_VERSION, StoredAgentUserResult
+from app.agent.user_result import AgentUserResult
 from app.agent.tool_loop import (
     DEFAULT_MAX_STEPS,
     LoopFailure,
@@ -324,6 +327,16 @@ class RecordedRunOutcome:
     outcome: LoopOutcome
 
 
+@dataclass(frozen=True)
+class ValidatedRunOutcome(RecordedRunOutcome):
+    """已原子提交的运行与产品结果；只有 user_result.to_public() 可对外公开。
+
+    outcome 仍含内部候选、消息与证据，不可直接序列化整个对象。
+    """
+
+    user_result: AgentUserResult
+
+
 class AgentRunService:
     """在现有受控 loop 外创建、投影并终结 Agent Run。
 
@@ -352,8 +365,14 @@ class AgentRunService:
         registry: ToolRegistry,
         execution_context: ToolExecutionContext,
         max_steps: int = DEFAULT_MAX_STEPS,
+        result_validator: Callable[[LoopOutcome], AgentUserResult] | None = None,
     ) -> RecordedRunOutcome:
-        """执行唯一受控 loop，并持久化安全 Run/Event 事实。"""
+        """执行唯一 loop；可注入本次证据验证器，在最终写事务前产生产品结果。
+
+        无验证器的旧离线调用保持 Run/Event 合同；有验证器时要求可信单文档，
+        返回 ValidatedRunOutcome。验证或存储异常传播，不能报告已保存。
+        模型、检索及产品验证均在 SQLite 终结写事务之外执行。
+        """
         if isinstance(max_steps, bool) or not isinstance(max_steps, int):
             raise TypeError("max_steps 只能是整数")
         if max_steps < 1:
@@ -363,9 +382,24 @@ class AgentRunService:
         if not isinstance(workspace_id, str) or not workspace_id.strip():
             raise ValueError("可信 workspace_id 不能为空")
 
+        document_id = None
+        if result_validator is not None:
+            if not callable(result_validator):
+                raise TypeError("结果验证器必须可调用")
+            filters = execution_context.filters
+            if (
+                filters is None
+                or not isinstance(filters.document_id, str)
+                or not filters.document_id.strip()
+            ):
+                raise ValueError("产品结果要求服务端核准的单文档范围")
+            document_id = filters.document_id
+
         started_run = self._repository.start_run(
             workspace_id=workspace_id,
             execution_config_version=self._execution_config_version,
+            document_id=document_id,
+            user_result_version=USER_RESULT_VERSION if result_validator is not None else None,
         )
 
         outcome = run_tool_loop(
@@ -375,6 +409,9 @@ class AgentRunService:
             execution_context=execution_context,
             max_steps=max_steps,
         )
+
+        # 使用刚完成的唯一 loop 与本次证据会话；不补跑生成或检索。
+        user_result = result_validator(outcome) if result_validator is not None else None
 
         tool_events = _project_tool_events(
             run_id=started_run.run_id,
@@ -394,15 +431,37 @@ class AgentRunService:
         )
 
         terminal_status = terminal_status_for(outcome)
+        if user_result is not None:
+            # 新产品路径不用旧候选可用 flag 表示答案成功；旧离线路径保持原摘要。
+            safe_result = {
+                "user_result_status": user_result.status,
+                "trusted_result_summaries": (safe_result or {}).get("trusted_result_summaries", []),
+            }
+            terminal_event = RunEvent(
+                run_id=terminal_event.run_id,
+                sequence=terminal_event.sequence,
+                event_type=terminal_event.event_type,
+                payload={**terminal_event.payload, "user_result_status": user_result.status},
+                occurred_at=terminal_event.occurred_at,
+            )
 
         final_run = self._repository.finalize_run(
             workspace_id=workspace_id,
             terminal_status=terminal_status,
             safe_result=safe_result,
             terminal_event=terminal_event,
+            user_result=user_result,
         )
 
+        if user_result is not None:
+            return ValidatedRunOutcome(
+                run=final_run, outcome=outcome, user_result=user_result,
+            )
         return RecordedRunOutcome(
             run=final_run,
             outcome=outcome,
         )
+
+    def get_user_result(self, *, workspace_id: str, run_id: str) -> StoredAgentUserResult:
+        """用调用方已核准的 workspace 读取持久结果；原样传播安全读取异常。"""
+        return self._repository.get_user_result(workspace_id=workspace_id, run_id=run_id)

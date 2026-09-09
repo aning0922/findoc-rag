@@ -154,3 +154,15 @@
 - 保留单工具、四轮上限及配置 fail-fast；配置版本为 `runtime-search-result-v1`。不运行第二条 RAG 或模型生成链、不补检索、不注册计算。来源与编号校验不证明自然语言结论得到原文支持，语义质量仍需独立评测与人工核对。
 
 验证命令：`uv run --frozen pytest tests/test_agent_user_result.py tests/test_agent_runtime.py tests/test_agent_run_service.py tests/test_finance_tools.py tests/test_document_preparation.py tests/test_evidence_gate.py tests/test_day45_rag_service.py tests/test_day46_rag_service.py tests/test_day41_retriever.py tests/test_chat_service.py tests/test_chat_api.py tests/test_sse.py tests/test_runtime_startup.py -q`：**183 passed、5 条 SWIG 弃用警告**。相关 Ruff、9 个源码文件 mypy 和 diff 检查通过。新用例覆盖非法/跨范围引用、同名跨文档身份、字段与来源冲突、全空/混合搜索、伪造证据、跨 Run 编号隔离、四类 loop 失败及白名单；正式装配替换重依赖、使用临时 SQLite。仅证明代码合同与装配边界，未执行付费模型、真实 Agent smoke、历史评测或向量库重建。
+
+### 用户结果原子持久化（2026-09-09）
+
+- runtime 将本次 `SearchEvidenceSession.validate` 注入 `AgentRunService.execute`；唯一 loop 完成后先验证，再调用仓储终结。模型、检索和验证均不持有 SQLite 终结写锁；没有第二条生成或检索链。`ValidatedRunOutcome` 移至 Run 服务定义，runtime 继续可引用该类型；整个对象仍含内部证据，不可直接公开。
+- Run 非破坏性增加可空的 `document_id/user_result_version`。新产品 Run 在创建时写入服务端核准文档和 `agent-user-result-v1`，执行配置更新为 `runtime-search-result-v2`。`agent_user_results` 以 run_id 为主键，一次 Run 最多一份受限结果；workspace、文档和配置身份通过 Run 关联，结果 JSON 不接受模型自报身份。
+- [result_storage.py](../app/agent/result_storage.py) 显式编码三态：answered 保存状态、已验证正文和 `number/source_file/page/chunk_id` 引用；refusal 仅状态和稳定原因；system_error 仅状态和稳定错误码。固定提示文案读取后生成，不保存原始候选、messages、prompt、工具全文、隐藏推理或原始异常；拒答/错误无正文及引用。反序列化拒绝未知版本、重复/额外键、非法类型、三态混合及正文/引用编号不一致，不把结构验证当作重新核证语义。
+- `finalize_run` 同一 SQLite 连接和事务写结果、唯一结束事件、Run 状态/执行终态/结束时间/安全摘要。任意写入或序列化失败传播并回滚本次终结；原 running 与此前已提交工具事件可保留。重复终结一律状态冲突，不覆盖、不新增第二份结果，不提供隐式幂等成功或自动重跑。
+- Run `status/terminal_status` 与 Event 类型保持执行层合同；`user_result_status` 明确记录产品层。LoopSuccess 可对应 answered、refusal 或产品验证 system_error；LoopFailure 必须对应同类安全系统错误。新产品摘要不使用旧 `final_answer_available` 旗标，旧离线路径保持原摘要和终态映射。
+- `AgentRunService.get_user_result(workspace_id, run_id)` 委托仓储，在一个读快照中先查可信归属，再核验结果版本/结构、Run 与唯一结束事件的一致性。错误 workspace 和不存在均为相同 `AgentRunNotFoundError`；running 为 `AgentResultNotReadyError`，旧版/离线无产品合同为 `AgentResultNotStoredError`，新版本缺结果或记录损坏为安全的 `AgentResultIntegrityError`。返回元信息与 `user_result`，仅后者的 `to_public()` 是公开白名单；固定 demo 归属不等于认证。
+- 迁移只增加两列与一表，不删除/重建 runtime 库、不修改历史终态、不回填答案。旧代码可以忽略新增字段，但不能识别新产品合同，禁止以旧写路径终结带结果版本的新 Run；代码回退不能视为支持新结果的读取/写入，应用应停写并保留扩展结构及记录，恢复兼容版本后处理。不实现自动降级迁移或历史回填平台。
+
+定向验证：`uv run --frozen pytest tests/test_agent_run_repository.py tests/test_agent_run_service.py tests/test_agent_runtime.py tests/test_agent_user_result.py tests/test_runtime_startup.py tests/test_finance_tools.py -q`：**129 passed、5 条 SWIG 弃用警告**；相关 Ruff、5 个源码文件 mypy（`--follow-imports=silent`）通过。覆盖文件 SQLite 重开三态、读取零模型/检索、可信范围、真实触发器阻止三处写入、结果插入后的事件序列化失败、重复终结/序号、原两表结构扩展、损坏/非法载荷、禁止字段不落盘、验证时序与无写锁，以及前置失败零 Run 等回归。证据使用 fake 模型和重依赖替身，未触碰用户 runtime 库、调用付费模型、执行真实 Agent smoke、历史评测或向量重建；不代表全量测试、真实模型质量、HTTP/UI 或后台恢复已完成。

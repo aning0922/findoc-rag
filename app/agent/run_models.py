@@ -17,7 +17,7 @@ class RunEventSequenceError(ValueError):
 
 
 class RunStatus(StrEnum):
-    """Run的三种粗略状态"""
+    """执行层粗状态；succeeded 不代表产品 answered。"""
 
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -25,7 +25,7 @@ class RunStatus(StrEnum):
 
 
 class AgentTerminalStatus(StrEnum):
-    """Agent的终端状态"""
+    """loop 执行终态；用户读取以独立产品三态为准。"""
 
     SUCCESS = "success"
     """成功"""
@@ -60,7 +60,8 @@ class AgentRun:
 
     保存服务端生成的执行身份、可信 workspace、粗状态、精确终态、
     带时区的起止时间、安全结果摘要和执行配置版本。
-    只表示可查询的业务状态，不保存 prompt、完整消息、原始异常或隐藏推理。
+    status/terminal_status 表示执行层；产品状态在独立结果与安全摘要中明确标识。
+    不保存 prompt、完整消息、原始异常或隐藏推理。
     """
 
     run_id: str
@@ -68,9 +69,9 @@ class AgentRun:
     workspace_id: str
     """可信 workspace"""
     status: RunStatus
-    """粗状态"""
+    """执行粗状态，不表示用户回答成功。"""
     terminal_status: AgentTerminalStatus | None
-    """精确终态"""
+    """执行精确终态，不替代产品三态。"""
     started_at: datetime
     """带时区的起始时间"""
     ended_at: datetime | None
@@ -79,6 +80,10 @@ class AgentRun:
     """安全结果摘要"""
     execution_config_version: str
     """执行配置版本"""
+    document_id: str | None = None
+    """创建 Run 前服务端核准的文档身份；旧版或离线 Run 可为空。"""
+    user_result_version: str | None = None
+    """非空时要求终结事务同时保存此版本产品结果，不从执行状态推导结果。"""
 
     def __post_init__(self) -> None:
         """校验 Run 字段类型、时间和状态组合不变量。
@@ -101,6 +106,12 @@ class AgentRun:
             raise TypeError("execution_config_version 必须是非空字符串")
         if not self.execution_config_version.strip():
             raise ValueError("execution_config_version 只能是非空字符串")
+
+        if (self.document_id is None) != (self.user_result_version is None):
+            raise ValueError("文档身份和产品结果版本必须同时提供")
+        for value in (self.document_id, self.user_result_version):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError("文档身份和产品结果版本必须是非空字符串")
 
         if self.status is None or not isinstance(self.status, RunStatus):
             raise TypeError("status 只能是非空 RunStatus 枚举值")

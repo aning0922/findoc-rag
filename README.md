@@ -6,7 +6,7 @@
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
-Agent 已接入 runtime 并可返回经过引用验证的内存用户结果：复用上传库的 Retriever 与模型客户端，服务端查证单文档后只开放 `search_finance_docs`。当前请求限定为 `查询{四位年份}年度{指标}`，指标仅含营业收入、净利润、员工平均年龄；结果区分回答、可核证拒答与安全系统错误。证据来自假模型及替换重依赖的正式装配测试，尚未运行这条 Agent 链的真实依赖 smoke；计算、用户结果持久化和 HTTP/UI 尚未接通。范围与证据见[单文档任务合同及实现记录](doc/decisions.md#agent-单文档任务合同装配前约定)。
+Agent 已接入 runtime，并把经过验证的用户结果与 Run 终态、唯一结束事件原子保存到 SQLite；重开仓储可按可信 workspace/run 读取，无须重跑模型或检索。复用上传库的 Retriever 与模型客户端，服务端查证单文档后只开放 `search_finance_docs`。当前请求限定为 `查询{四位年份}年度{指标}`，指标仅含营业收入、净利润、员工平均年龄；结果区分回答、可核证拒答与安全系统错误。证据来自临时 SQLite、假模型及替换重依赖的正式装配测试，尚未运行这条 Agent 链的真实依赖 smoke；计算和 Agent HTTP/UI 尚未接通。范围与证据见[单文档任务合同及实现记录](doc/decisions.md#agent-单文档任务合同装配前约定)。
 
 ## 项目目标
 
@@ -112,12 +112,15 @@ LangChain分支只投影工具与消息合同：`ToolSpec → StructuredTool`，
 ```text
 服务端生成run_id + 注入可信workspace → 保存running Run
         → 调用唯一run_tool_loop
+        → runtime以本次SearchEvidenceSession验证产品三态（旧离线路径可不提供）
         → 从LoopOutcome/messages/trusted_tool_results提取白名单事实
-        → 同一事务写终态Event并终结Run
-        → workspace_id + run_id查询Run与有序Event
+        → 同一事务保存产品结果、写终态Event并终结Run
+        → workspace_id + run_id查询Run、有序Event与受限产品结果
 ```
 
 这里不保存system prompt、原始用户prompt、完整messages、检索全文、原始供应商响应、原始异常/traceback、密钥、base URL或隐藏CoT。错误workspace与不存在run对外采用相同not-found语义。
+
+Run/Event 的成功属于执行层，不代表产品 `answered`。产品结果独立存储，读取后仅以 `user_result.to_public()` 投影公开字段；旧记录没有产品结果时明确返回未保存语义，新版本终态缺结果则视为一致性错误。写入失败回滚本次终结的三项，之前的工具事件可以保留；重复终结报状态冲突。这不提供运行中崩溃后的自动续跑。
 
 真实工具smoke使用现有两个正式工具和`InMemoryFinancialFactRepository`固定fixture，在`max_steps=2`下以2次provider attempts完成`user→assistant→tool→assistant`，模型请求`calculate_financial_metric`，可信结果为`revenue_growth_rate_v1=25.00%`。该证据只证明真实SDK协议链和应用终止边界，不代表OCR、财报结构化抽取、持久化财务数据库或任意指标能力。
 
@@ -316,7 +319,7 @@ eval/                   # RAG评测资产，以及独立Agent 12题/config/唯�
 4. ~~修复真实表格embedding text/section，生成可回滚v2并完成同12题新旧对照~~（Day43完成）
 5. ~~复用Retriever完成可测试的最小非流式RAG控制层与fake失败边界~~（Day44完成）
 6. ~~增加稳定引用映射、引用校验、正式拒答与可信RAG API/SSE浏览器薄壳~~（单机原型完成）
-7. ~~增加原生Function Calling、两个财报工具、有限受控loop、LangChain工具/message薄适配、Run/Event及独立12题Agent评测~~；已补充仅检索的 Agent runtime、内存用户三态与引用验证及离线边界测试，后续实现用户结果持久化及 HTTP Run API。后台执行、崩溃恢复与实时事件仍为后续能力
+7. ~~增加原生Function Calling、两个财报工具、有限受控loop、LangChain工具/message薄适配、Run/Event及独立12题Agent评测~~；已补充仅检索的 Agent runtime、用户三态与引用验证、结果原子持久化及离线边界测试，后续实现 HTTP Run API。后台执行、崩溃恢复与实时事件仍为后续能力
 8. 增加鉴权、多用户workspace隔离、生产基础设施、Docker和可观测性；React最薄单页已完成，复杂UI后置
 
 只有经过代码、测试或可复现实验验证的能力，才会移动到“当前状态”中的可运行项。
