@@ -218,9 +218,12 @@ def create_runtime_app(
                 execution_config_version=RUNTIME_AGENT_CONFIG_VERSION,
             ),
         )
-        app = create_app(document_service, chat_service=chat_service)
+        app = create_app(
+            document_service, chat_service=chat_service,
+            agent_service=agent_service, agent_workspace_id=DEMO_WORKSPACE_ID,
+        )
         app.state.runtime_rag_resources = rag_resources
-        # 仅提供内部运行入口；尚未注册 Agent HTTP 路由或用户结果发布能力。
+        # 内部入口与 HTTP 复用同一运行服务、检索依赖和 Run 仓储。
         app.state.agent_service = agent_service
         app.add_event_handler("shutdown", rag_resources.milvus_client.close)
     except Exception:

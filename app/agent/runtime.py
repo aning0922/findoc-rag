@@ -1,13 +1,16 @@
-"""组装单文档 Agent，先验证用户结果，再与 Run/Event 原子提交；不实现 HTTP。"""
+"""组装单文档 Agent；同步执行离开事件循环，验证结果后与终态原子提交。"""
 
+import asyncio
 from types import MappingProxyType
 
 from app.agent.finance_tools import build_search_finance_tool_registry
+from app.agent.result_storage import StoredAgentUserResult
+from app.agent.run_models import RunEvent
 from app.agent.run_service import AgentRunService, ValidatedRunOutcome
 from app.agent.search_evidence import SearchEvidenceSession
 from app.agent.tool_loop import ToolCallingModel, ToolExecutionContext, ToolSpec
 from app.agent.user_result import supports_document_query
-from app.documents.preparation import DocumentTaskPreparer
+from app.documents.preparation import DocumentTaskPreparer, PreparedDocumentTask
 from app.rag.retriever import Retriever
 
 
@@ -57,8 +60,8 @@ class AgentRuntimeService:
 
         输入：非空文档查找键和任务文字，不接受 messages、scope 或执行预算。
         失败：输入非法、文档不可用或未 ready 时不调用模型/工具，不创建 Run。
-        边界：await 用于文档准备，之后的同步 loop 会占用当前调用线程；
-        当前仅供内部调用，HTTP 的线程边界由后续适配层明确，不承诺断开取消。
+        边界：保留异步准备，将同步内核、验证和持久化整体交给工作线程并等待；
+        不提供后台耐久、断开取消、总时限或 POST 请求幂等保证。
         """
         if not isinstance(document_id, str) or not document_id.strip():
             raise ValueError("document_id 必须是非空字符串")
@@ -71,6 +74,11 @@ class AgentRuntimeService:
             raise ValueError("Agent 任务必须有服务端核准的单文档范围")
         if prepared.source_file is None:
             raise ValueError("Agent 任务必须有服务端核准的文件名")
+        return await asyncio.to_thread(self._run_prepared, prepared)
+
+    def _run_prepared(self, prepared: PreparedDocumentTask) -> ValidatedRunOutcome:
+        """在线程内执行已核准任务；每次独立证据会话，提交失败原样传播。"""
+        assert prepared.source_file is not None  # run 已完成此前置检查。
         execution_context = ToolExecutionContext(
             trusted_context=prepared.context,
             filters=prepared.filters,
@@ -108,3 +116,11 @@ class AgentRuntimeService:
         if not isinstance(recorded, ValidatedRunOutcome):
             raise RuntimeError("产品运行未返回已提交的用户结果")
         return recorded
+
+    def get_user_result(self, *, workspace_id: str, run_id: str) -> StoredAgentUserResult:
+        """同步委托持久读取；workspace 须由服务端提供，异步调用方负责线程调度。"""
+        return self._run_service.get_user_result(workspace_id=workspace_id, run_id=run_id)
+
+    def list_events(self, *, workspace_id: str, run_id: str) -> list[RunEvent]:
+        """同步读取可信范围内的有序历史事件；不执行模型、工具或事件回放。"""
+        return self._run_service.list_events(workspace_id=workspace_id, run_id=run_id)

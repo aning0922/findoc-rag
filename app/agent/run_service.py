@@ -465,3 +465,7 @@ class AgentRunService:
     def get_user_result(self, *, workspace_id: str, run_id: str) -> StoredAgentUserResult:
         """用调用方已核准的 workspace 读取持久结果；原样传播安全读取异常。"""
         return self._repository.get_user_result(workspace_id=workspace_id, run_id=run_id)
+
+    def list_events(self, *, workspace_id: str, run_id: str) -> list[RunEvent]:
+        """仅委托按可信范围的历史读取；保留 not-found，调用方投影公开字段。"""
+        return self._repository.list_events(workspace_id=workspace_id, run_id=run_id)

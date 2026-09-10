@@ -10,6 +10,8 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
+from app.agent.runtime import AgentRuntimeService
+from app.api.agent import create_agent_router
 from app.api.schemas import (
     ChatRequest,
     DocumentResponse,
@@ -51,12 +53,16 @@ def create_app(
     document_service: DocumentService,
     *,
     chat_service: ChatService | None = None,
+    agent_service: AgentRuntimeService | None = None,
+    agent_workspace_id: str | None = None,
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
 ) -> FastAPI:
-    """创建包含health、文档处理和可选可信聊天接口的FastAPI应用
+    """创建 health、文档处理及可选聊天/Agent 接口的 FastAPI 应用。
 
     Args:
         document_service: 已注入基础设施依赖的文档应用服务。
+        agent_service: 已装配的 Agent 服务；缺省时 Agent 端点返回安全 503。
+        agent_workspace_id: 服务器配置的查询范围；启用 Agent 时必须显式提供。
         max_upload_bytes: 路由读取上传内容时使用的字节上限。
 
     Returns:
@@ -64,11 +70,15 @@ def create_app(
 
     Raises:
         ValueError: max_upload_bytes不是正整数。
+        ValueError: 启用 Agent 却未提供非空服务端 workspace。
     """
     if max_upload_bytes <= 0:
         raise ValueError("max_upload_bytes 必须是正整数")
 
     app = FastAPI(title="FinDoc RAG API")
+    app.include_router(create_agent_router(
+        service=agent_service, workspace_id=agent_workspace_id,
+    ))
 
     @app.get(
         "/health",

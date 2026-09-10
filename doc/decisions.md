@@ -166,3 +166,23 @@
 - 迁移只增加两列与一表，不删除/重建 runtime 库、不修改历史终态、不回填答案。旧代码可以忽略新增字段，但不能识别新产品合同，禁止以旧写路径终结带结果版本的新 Run；代码回退不能视为支持新结果的读取/写入，应用应停写并保留扩展结构及记录，恢复兼容版本后处理。不实现自动降级迁移或历史回填平台。
 
 定向验证：`uv run --frozen pytest tests/test_agent_run_repository.py tests/test_agent_run_service.py tests/test_agent_runtime.py tests/test_agent_user_result.py tests/test_runtime_startup.py tests/test_finance_tools.py -q`：**129 passed、5 条 SWIG 弃用警告**；相关 Ruff、5 个源码文件 mypy（`--follow-imports=silent`）通过。覆盖文件 SQLite 重开三态、读取零模型/检索、可信范围、真实触发器阻止三处写入、结果插入后的事件序列化失败、重复终结/序号、原两表结构扩展、损坏/非法载荷、禁止字段不落盘、验证时序与无写锁，以及前置失败零 Run 等回归。证据使用 fake 模型和重依赖替身，未触碰用户 runtime 库、调用付费模型、执行真实 Agent smoke、历史评测或向量重建；不代表全量测试、真实模型质量、HTTP/UI 或后台恢复已完成。
+
+### Agent 同步创建与安全历史查询（2026-09-10）
+
+[Agent HTTP 适配](../app/api/agent.py)通过 `create_app` 注入可选 runtime 与服务端固定 workspace；正式装配复用现有 Agent、Retriever、模型客户端和仓储。未启用 Agent 的应用仍可使用旧文档/聊天入口，Agent 端点返回安全 503；启用却缺少非空查询 workspace 则构造失败。固定 demo 仅证明资源绑定，不提供登录、多用户授权或公网生产保证。
+
+| 接口 | 完成条件与公开响应 |
+|---|---|
+| `POST /agent/runs` | 仅接受严格非空字符串 `document_id/query`，额外 JSON 字段拒绝。文档准备、执行、结果验证与终态提交完成后返回 201；`run_id/document_id/user_result` 为唯一顶层白名单 |
+| `GET /agent/runs/{run_id}` | 按服务器 workspace 委托 `AgentRunService.get_user_result`；200 返回与 POST 相同的身份/产品结果 DTO，不重新执行或修复性生成 |
+| `GET /agent/runs/{run_id}/events` | 按同一可信范围委托 `list_events`；200 返回 `run_id/projection="history"/events`，按 sequence 排序 |
+
+- POST 的 201 表示 Run 已创建且本次结果已提交，不代表产品 answered。`user_result.status` 可为 answered、refusal、system_error；均只从已校验结果的 `to_public()` 构造严格响应 DTO，不序列化内部 outcome 或任意数据库字段。拒答使用既有 `empty_retrieval/capability_limit` 原因，不新增业务类别。HTTP 输入结构合法但超出有限查询句式时，沿用现有能力限制流程；模型违约仍可能形成产品系统错误，不一律改成 422 或强制拒答。
+- GET 的 workspace 只取服务端构造参数，不使用客户端 body/query/header 中的同名或类似字段。不存在与范围外的 Run（包括 Events）采用完全相同的 404 与 `agent_run_not_found`；文档不存在/越界统一 `document_not_found`，未 ready 为 `document_not_ready`，均在模型、检索和 Run 创建前失败。
+- 错误响应统一为 `{"detail":{"code":"稳定错误码","message":"固定安全说明"}}`。请求结构非法为 422 `invalid_agent_request`；未 ready 文档为 409。结果未提交为 409 `agent_result_not_ready`，旧版/离线未存产品结果为 409 `agent_result_not_stored`，新版结果缺失/损坏/版本不支持为 500 `agent_result_integrity_error`。旧记录不能提示成等待即可恢复，running 也不承诺自动继续。
+- SQLite 读写失败为 500 `agent_storage_error`，未知异常为 500 `agent_internal_error`，缺失 Agent 依赖为 503 `agent_unavailable`。不回显参数校验输入、异常正文、SQL、绝对路径或原始模型内容；数据库提交失败不得返回内存产品结果并声称已保存。安全错误外壳仅作用于 Agent 端点，不修改旧聊天/SSE 的错误合同。
+- 每条公开 Event 只含 `sequence/execution_event_type/summary`，摘要按有限事件类型由服务器生成，不直通任何 payload；`run_succeeded` 摘要明确表示执行循环结束，产品结果以结果接口为准。历史投影不作为实时进度、精确工具耗时或副作用回放入口。
+- `AgentRuntimeService.run` 保留异步文档准备，随后 `await asyncio.to_thread(self._run_prepared, prepared)`，将每次独立证据会话、同步 loop、验证与持久化整体移出事件循环。GET 同步 SQLite 读取也通过 `to_thread` 调度；仓储在每次操作中自行打开/关闭连接，不跨线程复用活跃连接。POST 仍等待工作完成，不返回 202，不承诺线程强制取消、任务总超时或重启续跑；客户端断开后线程可能继续工作，但没有耐久保证。
+- 重复终结冲突不等于 POST 请求幂等。相同 POST 重发可能创建新 Run 并再次执行，客户端不得隐式自动重试并宣称不会重复。保留单文档、仅搜索、四轮、配置 fail-fast、有限查询与引用校验、原子提交及旧数据读取边界；不增加模型链、计算装配、worker 或 Agent SSE。
+
+定向验证：`uv run --frozen pytest tests/test_agent_api.py tests/test_agent_runtime.py tests/test_agent_run_service.py tests/test_event_loop_boundary.py tests/test_chat_api.py tests/test_runtime_startup.py -q`：**98 passed、5 条 SWIG 弃用警告**；相关 Ruff、6 个相关源码文件 mypy（`--follow-imports=silent`）及 diff 检查通过。新增 HTTP 集成复用受控正式装配，保留真实文档准备、Retriever/工具/loop、结果验证及临时文件 SQLite，覆盖三态重开读回、前置零执行、范围、损坏/旧结果、真实提交/读库故障、零重跑、Events 白名单、重复 POST 和可选依赖。模型调用、提交及两类 GET 读取使用独立观察线程与受控屏障，验证在放行前 health 已响应且原请求未返回；原有直接阻塞/线程调度正反对照保留。未知异常外壳另有纯 stub 补充测试，不能替代接口集成。未调用真实模型、触碰用户 runtime 库、重跑历史评测或修改 UI；这些证据不证明真实模型质量、真实重依赖并发兼容性或完整产品验收。

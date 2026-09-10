@@ -242,7 +242,9 @@ def test_production_runtime_shares_resources_and_passes_verified_scope(
     assert "final_answer" not in stored.safe_result
     assert "final_answer_available" not in stored.safe_result
     assert not {"content", "citations", "user_result"}.intersection(stored.safe_result)
-    assert not any("agent" in route.path for route in runtime.app.routes)
+    assert {path for path in runtime.app.openapi()["paths"] if "agent" in path} == {
+        "/agent/runs", "/agent/runs/{run_id}", "/agent/runs/{run_id}/events",
+    }
     for shutdown in runtime.app.router.on_shutdown:
         shutdown()
     runtime.milvus.close.assert_called_once_with()
