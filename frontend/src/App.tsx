@@ -1,36 +1,22 @@
 import { consumeSSEStream } from './sse'
+import {
+  buildChatTerminalView,
+  INITIAL_CHAT_VIEW,
+  parseCitationView,
+  type ChatViewState,
+  type CitationView,
+  type RagDoneOutcome,
+} from './ragResult'
+import {
+  canChangeDocument,
+  canStartRequest,
+  createRequestSnapshot,
+  isCurrentRequest,
+  isRequestDocumentReady,
+  type RequestSnapshot,
+} from './requestOwnership'
 import type { ChangeEvent } from 'react'
-import { useEffect, useState } from 'react'
-
-type ChatViewStatus =
-  | 'idle' //尚未提问
-  | 'streaming' //请求已经开始，但还没有可信终态
-  | 'success' //收到合法答案，引用以及 done(success)
-  | 'refusal' //收到正常拒答以及 done(refusal)
-  | 'error' //HTTP错误，系统失败或流协议不完整
-
-interface CitationView {
-  number: number
-  source_file: string
-  page: number
-  chunk_id: string
-}
-
-interface ChatViewState {
-  status: ChatViewStatus
-  answer: string | null
-  citations: CitationView[]
-  refusalReason: string | null
-  errorMessage: string | null
-}
-
-const INITIAL_CHAT_VIEW: ChatViewState = {
-  status: 'idle',
-  answer: null,
-  citations: [],
-  refusalReason: null,
-  errorMessage: null,
-}
+import { useEffect, useRef, useState } from 'react'
 
 type DocumentStatus =
   | 'queued'
@@ -50,6 +36,18 @@ interface DocumentRecord {
   safe_error_message: string | null
   created_at: string
   updated_at: string
+}
+
+/**
+ * 保存当前 RAG 请求的快照和客户端取消手柄。
+ *
+ * 输入：提交入口同步创建的 RequestSnapshot 与 AbortController。
+ * 输出：供入口、列表失效、回调和组件清理核对同一次请求。
+ * 边界：abort 只停止客户端等待，不证明后端执行已经取消。
+ */
+interface ActiveChatRequest {
+  snapshot: RequestSnapshot
+  controller: AbortController
 }
 
 /**
@@ -75,12 +73,16 @@ function requireDataObject(data: unknown): Record<string, unknown> {
 function App() {
   // 保存后端返回的文档列表
   const [documents, setDocuments] = useState<DocumentRecord[]>([])
+  // 同步保存最新列表，供异步回调在 React 重渲染之外判断文档是否仍 ready
+  const documentsRef = useRef<DocumentRecord[]>([])
   // 表示文档列表请求是否仍在进行，用于控制加载提示和按钮
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   // 保存可以展示给用户的安全错误消息，null 表示当前没有错误
   const [documentError, setDocumentError] = useState<string | null>(null)
   // 保存用户当前选择的 ready 文档身份；null 表示尚未选择
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
+  // 同步保存当前选择，供列表响应立即清理已经失效的文档归属
+  const selectedDocumentIdRef = useRef<string | null>(null)
   // 保存用户从文件选择框中选中的 PDF；null 表示尚未选中
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
@@ -94,6 +96,51 @@ function App() {
   const [query, setQuery] = useState('')
   // 保存一次聊天请求当前可展示的可信页面状态
   const [chatView, setChatView] = useState<ChatViewState>(INITIAL_CHAT_VIEW)
+  // 同步保存唯一活动请求，防止重渲染前重复提交并拒绝所有迟到回调
+  const activeChatRequestRef = useRef<ActiveChatRequest | null>(null)
+  // 为每次 RAG 提交分配本地唯一身份；不使用后端不存在的 run_id
+  const nextChatRequestIdRef = useRef(1)
+
+  /**
+   * 应用最新文档列表并立即作废已经失去 ready 的页面归属。
+   *
+   * @param nextDocuments - 文档接口刚返回的最新列表。
+   * @returns void；同步引用和 React 状态一起更新。
+   * @remarks 文档失效会先撤销客户端等待；迟到回调因请求身份不匹配而静默丢弃。
+   */
+  function applyDocumentList(nextDocuments: DocumentRecord[]): void {
+    documentsRef.current = nextDocuments
+    setDocuments(nextDocuments)
+
+    const activeRequest = activeChatRequestRef.current
+    const activeRequestInvalid = activeRequest !== null
+      && !isRequestDocumentReady(nextDocuments, activeRequest.snapshot)
+    if (activeRequestInvalid) {
+      activeChatRequestRef.current = null
+      activeRequest.controller.abort()
+      setChatView({
+        status: 'error',
+        answer: null,
+        citations: [],
+        refusalReason: null,
+        errorMessage: '所选文档已不可用，请重新选择后提问',
+      })
+    }
+
+    const selectedId = selectedDocumentIdRef.current
+    const selectedDocumentStillReady = selectedId !== null
+      && nextDocuments.some(
+        (document) =>
+          document.document_id === selectedId && document.status === 'ready',
+      )
+    if (selectedId !== null && !selectedDocumentStillReady) {
+      selectedDocumentIdRef.current = null
+      setSelectedDocumentId(null)
+      if (!activeRequestInvalid) {
+        setChatView(INITIAL_CHAT_VIEW)
+      }
+    }
+  }
 
   /**
    * 从后端加载固定 workspace 的文档列表
@@ -110,7 +157,7 @@ function App() {
       }
       const data = (await response.json()) as DocumentRecord[]
       setDocumentError(null)
-      setDocuments(data)
+      applyDocumentList(data)
     }
     catch {
       setDocumentError('无法加载文档，请稍后重试')
@@ -192,11 +239,40 @@ function App() {
     setQuery(event.currentTarget.value)
   }
 
+  /**
+   * 在没有活动请求时切换 ready 文档并撤下前一文档结果。
+   *
+   * @param documentId - 用户尝试选择的文档 ID。
+   * @returns void；合法选择写入同步引用和 React 状态。
+   * @remarks pending 或最新列表中非 ready 的选择会在处理入口直接拒绝。
+   */
+  function handleDocumentSelection(documentId: string): void {
+    if (!canChangeDocument(activeChatRequestRef.current?.snapshot ?? null)) {
+      return
+    }
+    const documentIsReady = documentsRef.current.some(
+      (document) =>
+        document.document_id === documentId && document.status === 'ready',
+    )
+    if (!documentIsReady) {
+      return
+    }
+
+    selectedDocumentIdRef.current = documentId
+    setSelectedDocumentId(documentId)
+    setChatView(INITIAL_CHAT_VIEW)
+  }
+
 
   useEffect(() => {
     // 初次挂载需要同步外部文档服务；状态只会在等待网络响应后更新
     // oxlint-disable-next-line react/set-state-in-effect
     void loadDocuments()
+    return () => {
+      const activeRequest = activeChatRequestRef.current
+      activeChatRequestRef.current = null
+      activeRequest?.controller.abort()
+    }
   }, [])
 
   useEffect(() => {
@@ -231,23 +307,43 @@ function App() {
   /**
    * 向当前 ready 文档提交问题并消费可信 SSE 终态
    *
-   * 输入：selectedReadyDocument 和 query 和当前 React 状态
+   * 输入：同步文档选择、最新文档列表、query 和活动请求引用
    * 输出：Promise<void>，最终结果通过 chatView 展示
    * 失败：HTTP 错误，流中断，字段非法或终态不匹配时显示安全错误
    */
   async function submitQuestion(): Promise<void> {
-    const trimmedQuery = query.trim()
-    if (selectedReadyDocument === null || trimmedQuery.length === 0) {
+    if (!canStartRequest(activeChatRequestRef.current?.snapshot ?? null)) {
       return
     }
 
+    const trimmedQuery = query.trim()
+    const selectedId = selectedDocumentIdRef.current
+    if (
+      selectedId === null
+      || trimmedQuery.length === 0
+      || !documentsRef.current.some(
+        (document) =>
+          document.document_id === selectedId && document.status === 'ready',
+      )
+    ) {
+      return
+    }
+
+    const requestSnapshot = createRequestSnapshot(
+      nextChatRequestIdRef.current,
+      selectedId,
+      trimmedQuery,
+    )
+    nextChatRequestIdRef.current += 1
+    const controller = new AbortController()
+    activeChatRequestRef.current = { snapshot: requestSnapshot, controller }
     setChatView({ ...INITIAL_CHAT_VIEW, status: 'streaming' })
 
     let streamedAnswer: string | null = null
     const streamedCitations: CitationView[] = []
     let refusalReason: string | null = null
     let safeErrorMessage: string | null = null
-    let doneOutcome: 'success' | 'refusal' | 'error' | null = null
+    let doneOutcome: RagDoneOutcome | null = null
 
     try {
       const response = await fetch('/api/chat', {
@@ -255,9 +351,10 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
         body: JSON.stringify({
-          document_id: selectedReadyDocument.document_id,
-          query: trimmedQuery,
+          document_id: requestSnapshot.documentId,
+          query: requestSnapshot.query,
         })
       })
       if (!response.ok) {
@@ -290,21 +387,8 @@ function App() {
             break
 
           case 'citation':
-            // 验证并追加四个引用字段
-            if (
-              typeof data.number !== 'number' ||
-              typeof data.source_file !== 'string' ||
-              typeof data.page !== 'number' ||
-              typeof data.chunk_id !== 'string'
-            ) {
-              throw new Error('citation 字段非法')
-            }
-            streamedCitations.push({
-              number: data.number,
-              source_file: data.source_file,
-              page: data.page,
-              chunk_id: data.chunk_id,
-            })
+            // 正整数与非空来源字段不合法时立即使本次流失败
+            streamedCitations.push(parseCitationView(data))
             break
 
           case 'usage':
@@ -328,47 +412,33 @@ function App() {
             break
         }
       })
-      if (doneOutcome === 'success') {
-        if (streamedAnswer === null) {
-          throw new Error('成功终态缺少 final_answer')
-        }
-
-        setChatView({
-          status: 'success',
-          answer: streamedAnswer,
-          citations: streamedCitations,
-          refusalReason: null,
-          errorMessage: null,
-        })
+      const terminalView = buildChatTerminalView({
+        answer: streamedAnswer,
+        citations: streamedCitations,
+        refusalReason,
+        errorMessage: safeErrorMessage,
+        doneOutcome,
+      })
+      if (!isCurrentRequest(activeChatRequestRef.current?.snapshot ?? null, requestSnapshot)) {
         return
       }
-      if (doneOutcome === 'refusal') {
-        if (refusalReason === null) {
-          throw new Error('拒答终态缺少 reason')
-        }
-
-        setChatView({
-          status: 'refusal',
-          answer: null,
-          citations: [],
-          refusalReason: refusalReason,
-          errorMessage: null,
-        })
-        return
-      }
-      if (doneOutcome === 'error' && safeErrorMessage !== null) {
-
+      if (!isRequestDocumentReady(documentsRef.current, requestSnapshot)) {
+        activeChatRequestRef.current = null
+        controller.abort()
         setChatView({
           status: 'error',
           answer: null,
           citations: [],
           refusalReason: null,
-          errorMessage: safeErrorMessage,
+          errorMessage: '所选文档已不可用，请重新选择后提问',
         })
         return
       }
-      throw new Error('SSE 终态与事件内容不匹配')
+      setChatView(terminalView)
     } catch {
+      if (!isCurrentRequest(activeChatRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+        return
+      }
       setChatView({
         status: 'error',
         answer: null,
@@ -376,6 +446,10 @@ function App() {
         refusalReason: null,
         errorMessage: '问答失败或响应流未完整结束',
       })
+    } finally {
+      if (isCurrentRequest(activeChatRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+        activeChatRequestRef.current = null
+      }
     }
   }
 
@@ -442,8 +516,8 @@ function App() {
                   name="selected-document"
                   value={document.document_id}
                   checked={selectedDocumentId === document.document_id}
-                  disabled={document.status !== 'ready'}
-                  onChange={() => setSelectedDocumentId(document.document_id)}
+                  disabled={document.status !== 'ready' || chatView.status === 'streaming'}
+                  onChange={() => handleDocumentSelection(document.document_id)}
                 />
                 <span>{document.source_file}</span>
                 <span>状态：{document.status}</span>
