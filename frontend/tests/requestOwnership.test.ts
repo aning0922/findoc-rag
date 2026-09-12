@@ -7,6 +7,7 @@ import {
   createRequestSnapshot,
   isCurrentRequest,
   isRequestDocumentReady,
+  resolveActiveRequest,
   type RequestSnapshot,
 } from '../src/requestOwnership.ts'
 
@@ -22,6 +23,20 @@ test('pending 时文档切换同时受实际入口守卫保护', () => {
 
   assert.equal(canChangeDocument(request), false)
   assert.equal(canChangeDocument(null), true)
+})
+
+test('RAG 或 Agent 任一 pending 都会占有共享入口', () => {
+  const ragRequest = createRequestSnapshot(1, 'document-a', '自由问题')
+  const agentRequest = createRequestSnapshot(2, 'document-a', '查询2025年度营业收入')
+
+  assert.equal(canStartRequest(resolveActiveRequest(ragRequest, null)), false)
+  assert.equal(canStartRequest(resolveActiveRequest(null, agentRequest)), false)
+  assert.equal(canChangeDocument(resolveActiveRequest(null, agentRequest)), false)
+  assert.equal(resolveActiveRequest(null, null), null)
+  assert.throws(
+    () => resolveActiveRequest(ragRequest, agentRequest),
+    /只能有一个活动请求/,
+  )
 })
 
 test('相同文档和问题的迟到请求仍按本地请求身份丢弃', () => {

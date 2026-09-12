@@ -72,6 +72,24 @@ export function canChangeDocument(activeRequest: RequestSnapshot | null): boolea
 }
 
 /**
+ * 合并两个产品模式的活动请求，形成共享入口唯一看到的请求身份。
+ *
+ * @param first - 第一个模式当前占有的请求，通常是 RAG。
+ * @param second - 第二个模式当前占有的请求，通常是 Agent。
+ * @returns 唯一活动请求；两个模式都空闲时返回 null。
+ * @throws 两个模式同时有请求时抛出，暴露首版不允许的并发状态。
+ */
+export function resolveActiveRequest(
+  first: RequestSnapshot | null,
+  second: RequestSnapshot | null,
+): RequestSnapshot | null {
+  if (first !== null && second !== null) {
+    throw new Error('首版同一时间只能有一个活动请求')
+  }
+  return first ?? second
+}
+
+/**
  * 判断一个回调是否仍拥有当前活动请求。
  *
  * @param activeRequest - 页面此刻认可的活动请求，null 表示没有 pending。

@@ -13,8 +13,21 @@ import {
   createRequestSnapshot,
   isCurrentRequest,
   isRequestDocumentReady,
+  resolveActiveRequest,
   type RequestSnapshot,
 } from './requestOwnership'
+import {
+  buildAgentPendingView,
+  buildAgentRequestErrorView,
+  INITIAL_AGENT_VIEW,
+  type AgentViewState,
+} from './agentResult'
+import {
+  AGENT_METRICS,
+  buildAgentQuery,
+  createAgentRun,
+  type AgentMetric,
+} from './agentRequest'
 import type { ChangeEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -50,6 +63,14 @@ interface ActiveChatRequest {
   controller: AbortController
 }
 
+/** Agent 请求使用独立活动身份；结构共享但不会写入 RAG 展示状态。 */
+interface ActiveAgentRequest {
+  snapshot: RequestSnapshot
+  controller: AbortController
+}
+
+type WorkbenchMode = 'rag' | 'agent'
+
 /**
  * 确认 SSE data 是可以按字段读取的普通 JSON 对象。
  *
@@ -65,10 +86,10 @@ function requireDataObject(data: unknown): Record<string, unknown> {
 }
 
 /**
- * 展示PDF上传、文档状态轮询和可信SSE问答的单页薄壳。
+ * 展示 PDF 上传、共享文档选择、RAG 问答和有限 Agent 任务的单页工作台。
  *
- * @returns 包含文档选择、问题提交和可信终态展示的React页面。
- * @remarks 只在收到匹配的done后提交答案或拒答；网络和协议失败显示安全错误。
+ * @returns 包含两种独立请求模式、可信终态、引用和安全错误的 React 页面。
+ * @remarks RAG 消费 SSE；Agent 等待同步 JSON，二者共享文档但不混用展示状态。
  */
 function App() {
   // 保存后端返回的文档列表
@@ -100,6 +121,28 @@ function App() {
   const activeChatRequestRef = useRef<ActiveChatRequest | null>(null)
   // 为每次 RAG 提交分配本地唯一身份；不使用后端不存在的 run_id
   const nextChatRequestIdRef = useRef(1)
+  // 保存当前工作区入口；任一请求 pending 时不允许跨模式切换
+  const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>('rag')
+  // 保存 Agent 的四位 ASCII 年份输入；合法性在提交前完整核对
+  const [agentYear, setAgentYear] = useState('2025')
+  // 保存 Agent 首版三个固定指标之一
+  const [agentMetric, setAgentMetric] = useState<AgentMetric>('营业收入')
+  // 保存独立 Agent 页面状态，绝不借用 RAG 的 streaming/success 状态
+  const [agentView, setAgentView] = useState<AgentViewState>(INITIAL_AGENT_VIEW)
+  // 同步保存唯一 Agent 请求，供入口和迟到回调立即核对
+  const activeAgentRequestRef = useRef<ActiveAgentRequest | null>(null)
+  // 为 Agent POST 分配本地请求身份；它与服务端 run_id 不同
+  const nextAgentRequestIdRef = useRef(1)
+  // 保存最近一次实际提交的有限任务，避免结果被后续表单编辑改写含义
+  const [submittedAgentQuery, setSubmittedAgentQuery] = useState<string | null>(null)
+
+  /** 返回当前任一模式占有的请求快照，供共享入口阻止并发。 */
+  function getActiveRequestSnapshot(): RequestSnapshot | null {
+    return resolveActiveRequest(
+      activeChatRequestRef.current?.snapshot ?? null,
+      activeAgentRequestRef.current?.snapshot ?? null,
+    )
+  }
 
   /**
    * 应用最新文档列表并立即作废已经失去 ready 的页面归属。
@@ -127,6 +170,17 @@ function App() {
       })
     }
 
+    const activeAgentRequest = activeAgentRequestRef.current
+    const activeAgentRequestInvalid = activeAgentRequest !== null
+      && !isRequestDocumentReady(nextDocuments, activeAgentRequest.snapshot)
+    if (activeAgentRequestInvalid) {
+      activeAgentRequestRef.current = null
+      activeAgentRequest.controller.abort()
+      setAgentView(buildAgentRequestErrorView(
+        '所选文档已不可用，本次 Agent 结果已撤下，请重新选择后提交',
+      ))
+    }
+
     const selectedId = selectedDocumentIdRef.current
     const selectedDocumentStillReady = selectedId !== null
       && nextDocuments.some(
@@ -138,6 +192,10 @@ function App() {
       setSelectedDocumentId(null)
       if (!activeRequestInvalid) {
         setChatView(INITIAL_CHAT_VIEW)
+      }
+      if (!activeAgentRequestInvalid) {
+        setAgentView(INITIAL_AGENT_VIEW)
+        setSubmittedAgentQuery(null)
       }
     }
   }
@@ -247,7 +305,7 @@ function App() {
    * @remarks pending 或最新列表中非 ready 的选择会在处理入口直接拒绝。
    */
   function handleDocumentSelection(documentId: string): void {
-    if (!canChangeDocument(activeChatRequestRef.current?.snapshot ?? null)) {
+    if (!canChangeDocument(getActiveRequestSnapshot())) {
       return
     }
     const documentIsReady = documentsRef.current.some(
@@ -261,6 +319,8 @@ function App() {
     selectedDocumentIdRef.current = documentId
     setSelectedDocumentId(documentId)
     setChatView(INITIAL_CHAT_VIEW)
+    setAgentView(INITIAL_AGENT_VIEW)
+    setSubmittedAgentQuery(null)
   }
 
 
@@ -272,6 +332,9 @@ function App() {
       const activeRequest = activeChatRequestRef.current
       activeChatRequestRef.current = null
       activeRequest?.controller.abort()
+      const activeAgentRequest = activeAgentRequestRef.current
+      activeAgentRequestRef.current = null
+      activeAgentRequest?.controller.abort()
     }
   }, [])
 
@@ -303,6 +366,47 @@ function App() {
       (document) =>
         document.document_id === selectedDocumentId && document.status === 'ready'
     ) ?? null
+  const requestIsPending = chatView.status === 'streaming' || agentView.status === 'pending'
+  const agentYearIsValid = /^[0-9]{4}$/.test(agentYear)
+  const agentQueryPreview = agentYearIsValid
+    ? buildAgentQuery(agentYear, agentMetric)
+    : null
+  const agentViewDocumentId = agentView.status === 'pending'
+    || agentView.status === 'answered'
+    || agentView.status === 'refusal'
+    || agentView.status === 'system_error'
+    ? agentView.documentId
+    : null
+  const agentViewDocumentName = agentViewDocumentId === null
+    ? null
+    : documents.find((document) => document.document_id === agentViewDocumentId)?.source_file
+      ?? agentViewDocumentId
+
+  /**
+   * 在没有活动请求时切换 RAG 或 Agent 工作区。
+   *
+   * @param mode - 用户选择的工作区入口。
+   * @returns void；pending 时入口守卫拒绝跨模式绕过并发限制。
+   */
+  function handleWorkbenchMode(mode: WorkbenchMode): void {
+    if (!canChangeDocument(getActiveRequestSnapshot())) {
+      return
+    }
+    setWorkbenchMode(mode)
+  }
+
+  /** 保存 Agent 年份原始输入；提交按钮只在四位 ASCII 数字时可用。 */
+  function handleAgentYearChange(event: ChangeEvent<HTMLInputElement>): void {
+    setAgentYear(event.currentTarget.value)
+  }
+
+  /** 保存固定指标选择；DOM 选项之外的值不会进入任务构造。 */
+  function handleAgentMetricChange(event: ChangeEvent<HTMLSelectElement>): void {
+    const metric = event.currentTarget.value as AgentMetric
+    if (AGENT_METRICS.includes(metric)) {
+      setAgentMetric(metric)
+    }
+  }
 
   /**
    * 向当前 ready 文档提交问题并消费可信 SSE 终态
@@ -312,7 +416,7 @@ function App() {
    * 失败：HTTP 错误，流中断，字段非法或终态不匹配时显示安全错误
    */
   async function submitQuestion(): Promise<void> {
-    if (!canStartRequest(activeChatRequestRef.current?.snapshot ?? null)) {
+    if (!canStartRequest(getActiveRequestSnapshot())) {
       return
     }
 
@@ -453,12 +557,93 @@ function App() {
     }
   }
 
-  return (
-    <main>
-      <h1>FinDoc 可信问答</h1>
+  /**
+   * 用当前 ready 文档和受控表单创建一个同步 Agent Run。
+   *
+   * 输入：共享文档选择、四位年份、固定指标和独立活动请求引用。
+   * 输出：严格 DTO 转换后的 Agent 三态通过 agentView 展示。
+   * 失败：HTTP、断网或响应不可信时只显示 request_error，不自动重发 POST。
+   */
+  async function submitAgentTask(): Promise<void> {
+    if (!canStartRequest(getActiveRequestSnapshot())) {
+      return
+    }
 
-      <section>
+    const selectedId = selectedDocumentIdRef.current
+    if (
+      selectedId === null
+      || !documentsRef.current.some(
+        (document) =>
+          document.document_id === selectedId && document.status === 'ready',
+      )
+    ) {
+      return
+    }
+
+    let taskQuery: string
+    try {
+      taskQuery = buildAgentQuery(agentYear, agentMetric)
+    } catch {
+      setAgentView(buildAgentRequestErrorView(
+        '年份必须是四位数字，指标必须来自当前三个固定选项',
+      ))
+      return
+    }
+
+    const requestSnapshot = createRequestSnapshot(
+      nextAgentRequestIdRef.current,
+      selectedId,
+      taskQuery,
+    )
+    nextAgentRequestIdRef.current += 1
+    const controller = new AbortController()
+    activeAgentRequestRef.current = { snapshot: requestSnapshot, controller }
+    setSubmittedAgentQuery(taskQuery)
+    setAgentView(buildAgentPendingView(requestSnapshot.requestId, selectedId))
+
+    try {
+      const terminalView = await createAgentRun(
+        requestSnapshot.documentId,
+        requestSnapshot.query,
+        controller.signal,
+      )
+      if (!isCurrentRequest(activeAgentRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+        return
+      }
+      if (!isRequestDocumentReady(documentsRef.current, requestSnapshot)) {
+        activeAgentRequestRef.current = null
+        controller.abort()
+        setAgentView(buildAgentRequestErrorView(
+          '所选文档已不可用，本次 Agent 结果已撤下，请重新选择后提交',
+        ))
+        return
+      }
+      setAgentView(terminalView)
+    } catch {
+      if (!isCurrentRequest(activeAgentRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+        return
+      }
+      setAgentView(buildAgentRequestErrorView(
+        'Agent 请求失败或响应无法确认；不会自动重试，且当前没有已确认的 Run 身份',
+      ))
+    } finally {
+      if (isCurrentRequest(activeAgentRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+        activeAgentRequestRef.current = null
+      }
+    }
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="app-header">
+        <p className="eyebrow">FinDoc · 本地可信文档助手</p>
+        <h1>从资料到可核对的结果</h1>
+        <p>先选择一篇处理完成的文档，再使用自由问答或有限 Agent 任务。</p>
+      </header>
+
+      <section className="card upload-panel">
         <h2>上传 PDF</h2>
+        <p className="section-description">当前只接收文本型 PDF，上传后会出现在资料列表中。</p>
 
         <label htmlFor="pdf-file">选择文本型 PDF</label>
         <input
@@ -487,7 +672,13 @@ function App() {
         )}
       </section>
 
-      <p>当前共有 {documents.length} 篇文档</p>
+      <section className="card documents-panel" aria-labelledby="documents-title">
+      <div className="section-heading-row">
+        <div>
+          <h2 id="documents-title">1. 选择资料</h2>
+          <p className="section-description">当前共有 {documents.length} 篇；只有 ready 文档可以选择。</p>
+        </div>
+      </div>
       {/* 请求尚未结束时，只显示加载提示 */}
       {isLoadingDocuments && (<p>正在加载文档……</p>)}
 
@@ -507,33 +698,69 @@ function App() {
 
       {/* 请求成功且存在文档时，把每条记录转换为一个列表项 */}
       {!isLoadingDocuments && documentError === null && documents.length > 0 && (
-        <ul>
+        <ul className="document-list">
           {documents.map((document) => (
             <li key={document.document_id}>
-              <label>
+              <label className="document-option">
                 <input
                   type="radio"
                   name="selected-document"
                   value={document.document_id}
                   checked={selectedDocumentId === document.document_id}
-                  disabled={document.status !== 'ready' || chatView.status === 'streaming'}
+                  disabled={document.status !== 'ready' || requestIsPending}
                   onChange={() => handleDocumentSelection(document.document_id)}
                 />
-                <span>{document.source_file}</span>
-                <span>状态：{document.status}</span>
+                <span className="document-name">{document.source_file}</span>
+                <span className={`status-badge status-${document.status}`}>{document.status}</span>
               </label>
+              {document.status === 'failed' && document.safe_error_message !== null && (
+                <p className="message error" role="alert">处理失败：{document.safe_error_message}</p>
+              )}
             </li>
           ))}
         </ul>
       )}
       {selectedDocumentId !== null && (
-        <p>已选择文档：{selectedDocumentId}</p>
+        <p className="selected-document">已选择文档：<code>{selectedDocumentId}</code></p>
       )}
-      <section>
-        <h2>向文档提问</h2>
+      </section>
+
+      <section className="card workbench-panel" aria-labelledby="workbench-title">
+        <h2 id="workbench-title">2. 构造任务并查看结果</h2>
+        <p className="section-description">RAG 接收自由问题；Agent 只接收页面提供的年份和指标。</p>
+        <div className="mode-switch" aria-label="选择工作区">
+          <button
+            className="mode-button"
+            type="button"
+            aria-pressed={workbenchMode === 'rag'}
+            disabled={requestIsPending}
+            onClick={() => handleWorkbenchMode('rag')}
+          >
+            RAG 自由问答
+          </button>
+          <button
+            className="mode-button"
+            type="button"
+            aria-pressed={workbenchMode === 'agent'}
+            disabled={requestIsPending}
+            onClick={() => handleWorkbenchMode('agent')}
+          >
+            Agent 有限任务
+          </button>
+        </div>
+
+      {workbenchMode === 'rag' && (
+      <section className="workbench-content" aria-labelledby="rag-title">
+        <div className="section-heading-row">
+          <div>
+            <h3 id="rag-title">向当前资料自由提问</h3>
+            <p className="section-description">该入口消费六事件 SSE；它不是 Agent Run。</p>
+          </div>
+          <span className="mode-label">RAG · SSE</span>
+        </div>
 
         {selectedReadyDocument === null && (
-          <p>请先选择一篇 ready 文档</p>
+          <p className="message neutral">请先选择一篇 ready 文档</p>
         )}
 
         <label htmlFor="chat-query">问题</label>
@@ -541,33 +768,33 @@ function App() {
           id="chat-query"
           value={query}
           onChange={handleQueryChange}
-          disabled={selectedReadyDocument === null}
+          disabled={selectedReadyDocument === null || requestIsPending}
           rows={4}
         />
         <button
           type="button"
           disabled={
-            selectedReadyDocument === null || query.trim().length === 0 || chatView.status === 'streaming'
+            selectedReadyDocument === null || query.trim().length === 0 || requestIsPending
           }
           onClick={() => void submitQuestion()}
         >
-          发送问题
+          {chatView.status === 'streaming' ? '正在查询……' : '发送问题'}
         </button>
 
         {chatView.status === 'streaming' && (
-          <p>正在查询并验证答案……</p>
+          <p className="message neutral" role="status">正在查询并验证答案……</p>
         )}
 
         {chatView.status === 'success' && chatView.answer !== null && (
-          <section>
+          <section className="result-card">
             <h3>答案</h3>
-            <p>{chatView.answer}</p>
+            <p className="answer-copy">{chatView.answer}</p>
 
             <h3>引用</h3>
             {chatView.citations.length === 0 ? (
               <p>没有引用</p>
             ) : (
-              <ol>
+              <ol className="citation-list">
                 {chatView.citations.map((citation) => (
                   <li key={citation.number}>
                     {citation.source_file}，第 {citation.page} 页，chunk：{citation.chunk_id}
@@ -579,12 +806,142 @@ function App() {
         )}
 
         {chatView.status === 'refusal' && (
-          <p>无法基于当前文档回答：{chatView.refusalReason}</p>
+          <p className="message warning" role="status">正常拒答：无法基于当前文档回答（{chatView.refusalReason}）</p>
         )}
 
         {chatView.status === 'error' && (
-          <p role="alert">{chatView.errorMessage}</p>
+          <p className="message error" role="alert">问答错误：{chatView.errorMessage}</p>
         )}
+      </section>
+      )}
+
+      {workbenchMode === 'agent' && (
+        <section className="workbench-content" aria-labelledby="agent-title">
+          <div className="section-heading-row">
+            <div>
+              <h3 id="agent-title">创建有限 Agent 任务</h3>
+              <p className="section-description">
+                支持任务不代表资料一定有答案，也不表示已经支持财务计算。
+              </p>
+            </div>
+            <span className="mode-label">Agent · JSON</span>
+          </div>
+
+          {selectedReadyDocument === null && (
+            <p className="message neutral">请先选择一篇 ready 文档</p>
+          )}
+
+          <div className="agent-form">
+            <label className="field-group" htmlFor="agent-year">
+              <span>年份</span>
+              <input
+                id="agent-year"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={4}
+                pattern="[0-9]{4}"
+                value={agentYear}
+                disabled={requestIsPending}
+                aria-describedby="agent-year-help"
+                onChange={handleAgentYearChange}
+              />
+              <small id="agent-year-help">四位 ASCII 数字，例如 2025</small>
+            </label>
+            <label className="field-group" htmlFor="agent-metric">
+              <span>指标</span>
+              <select
+                id="agent-metric"
+                value={agentMetric}
+                disabled={requestIsPending}
+                onChange={handleAgentMetricChange}
+              >
+                {AGENT_METRICS.map((metric) => (
+                  <option key={metric} value={metric}>{metric}</option>
+                ))}
+              </select>
+              <small>首版仅支持这三个固定指标</small>
+            </label>
+          </div>
+
+          <div className="task-preview">
+            <span>将提交的准确任务</span>
+            {agentQueryPreview === null
+              ? <strong>请输入四位数字年份</strong>
+              : <code>{agentQueryPreview}</code>}
+          </div>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={selectedReadyDocument === null || !agentYearIsValid || requestIsPending}
+            onClick={() => void submitAgentTask()}
+          >
+            {agentView.status === 'pending'
+              ? '正在处理任务……'
+              : agentView.status === 'request_error'
+                ? '再次创建 Agent Run（可能产生新 Run）'
+                : '创建并执行 Agent Run'}
+          </button>
+
+          {agentView.status === 'idle' && (
+            <p className="empty-state">提交后将在这里显示回答、正常拒答或错误。</p>
+          )}
+          {agentView.status === 'pending' && (
+            <section className="message neutral" role="status" aria-live="polite">
+              <strong>任务正在执行、验证并保存</strong>
+              <p>已提交：{submittedAgentQuery}</p>
+              <p>资料：{agentViewDocumentName}</p>
+              <p>这是同步等待状态，不是 SSE 实时进度。</p>
+            </section>
+          )}
+          {agentView.status === 'answered' && (
+            <section className="result-card">
+              <div className="section-heading-row">
+                <div><p className="eyebrow">已回答</p><h3>Agent 结果</h3></div>
+                <span className="result-status answered">answered</span>
+              </div>
+              <dl className="result-identity">
+                <div><dt>资料</dt><dd>{agentViewDocumentName}</dd></div>
+                <div><dt>Run ID</dt><dd><code>{agentView.runId}</code></dd></div>
+                <div><dt>任务</dt><dd>{submittedAgentQuery}</dd></div>
+              </dl>
+              <p className="answer-copy">{agentView.content}</p>
+              <h4>引用</h4>
+              <ol className="citation-list">
+                {agentView.citations.map((citation) => (
+                  <li key={`${citation.number}-${citation.chunk_id}`}>
+                    <strong>[{citation.number}] {citation.source_file}</strong>
+                    <span>第 {citation.page} 页 · chunk {citation.chunk_id}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {agentView.status === 'refusal' && (
+            <section className="message warning" role="status">
+              <strong>正常拒答</strong>
+              <p>{agentView.message}</p>
+              <p>原因：{agentView.reason}</p>
+              <p>资料：{agentViewDocumentName} · Run ID：{agentView.runId}</p>
+            </section>
+          )}
+          {agentView.status === 'system_error' && (
+            <section className="message error" role="alert">
+              <strong>已提交的产品错误</strong>
+              <p>{agentView.message}</p>
+              <p>错误码：{agentView.errorCode}</p>
+              <p>资料：{agentViewDocumentName} · Run ID：{agentView.runId}</p>
+            </section>
+          )}
+          {agentView.status === 'request_error' && (
+            <section className="message error" role="alert">
+              <strong>请求错误</strong>
+              <p>{agentView.message}</p>
+              {submittedAgentQuery !== null && <p>提交任务：{submittedAgentQuery}</p>}
+            </section>
+          )}
+        </section>
+      )}
       </section>
     </main>
   )
