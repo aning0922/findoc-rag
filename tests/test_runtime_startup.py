@@ -7,6 +7,12 @@ from types import ModuleType
 
 import pytest
 
+from app.api.runtime_factory import (
+    DEFAULT_RUNTIME_ROOT,
+    ISOLATED_RUNTIME_ROOT_ENV,
+    create_isolated_runtime_app_from_env,
+)
+
 
 class _RecordingMilvusClient:
     """仅记录启动测试中的Milvus动作，不连接真实数据库。"""
@@ -18,13 +24,36 @@ class _RecordingMilvusClient:
         """模拟关闭client，避免测试触碰真实Milvus。"""
 
 
+@pytest.mark.parametrize("raw_root", [None, "", "relative/runtime"])
+def test_isolated_runtime_factory_requires_explicit_absolute_root(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_root: str | None,
+) -> None:
+    """隔离 Uvicorn 入口没有安全绝对目录时在真实装配前失败。"""
+    if raw_root is None:
+        monkeypatch.delenv(ISOLATED_RUNTIME_ROOT_ENV, raising=False)
+    else:
+        monkeypatch.setenv(ISOLATED_RUNTIME_ROOT_ENV, raw_root)
+    with pytest.raises((RuntimeError, ValueError)):
+        create_isolated_runtime_app_from_env()
+
+
+def test_isolated_runtime_factory_rejects_default_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式隔离入口也不能把项目默认 runtime 当作测试目录。"""
+    monkeypatch.setenv(ISOLATED_RUNTIME_ROOT_ENV, str(DEFAULT_RUNTIME_ROOT))
+    with pytest.raises(ValueError, match="拒绝使用项目默认 runtime"):
+        create_isolated_runtime_app_from_env()
+
+
 def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """缺少API key时只检查配置，不预热BGE或创建runtime持久化资源。"""
     calls: list[str] = []
-    fail_config = False
+    fail_config = True
 
     from app.agent import sqlite_run_repository
     from app.documents import local_object_store, sqlite_repository
@@ -90,17 +119,17 @@ def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
 
     import app.api as api_package
 
-    previous_main = sys.modules.pop("app.api.main", None)
-    had_main_attribute = hasattr(api_package, "main")
-    previous_main_attribute = getattr(api_package, "main", None)
+    previous_factory = sys.modules.pop("app.api.runtime_factory", None)
+    had_factory_attribute = hasattr(api_package, "runtime_factory")
+    previous_factory_attribute = getattr(api_package, "runtime_factory", None)
     try:
-        runtime_main = importlib.import_module("app.api.main")
-        calls.clear()
-        fail_config = True
+        runtime_factory = importlib.import_module("app.api.runtime_factory")
+        # 安全 factory 的导入本身不能读取配置、预热或构造任何持久化资源。
+        assert calls == []
         runtime_root = tmp_path / "runtime"
 
         with pytest.raises(KeyError, match="LLM_API_KEY"):
-            runtime_main.create_runtime_app(runtime_root)
+            runtime_factory.create_runtime_app(runtime_root)
 
         assert calls == ["config"]
         unexpected_runtime_paths = (
@@ -113,10 +142,10 @@ def test_missing_llm_api_key_stops_before_runtime_resource_initialization(
 
         assert created_runtime_paths == []
     finally:
-        sys.modules.pop("app.api.main", None)
-        if previous_main is not None:
-            sys.modules["app.api.main"] = previous_main
-        if had_main_attribute:
-            setattr(api_package, "main", previous_main_attribute)
-        elif hasattr(api_package, "main"):
-            delattr(api_package, "main")
+        sys.modules.pop("app.api.runtime_factory", None)
+        if previous_factory is not None:
+            sys.modules["app.api.runtime_factory"] = previous_factory
+        if had_factory_attribute:
+            setattr(api_package, "runtime_factory", previous_factory_attribute)
+        elif hasattr(api_package, "runtime_factory"):
+            delattr(api_package, "runtime_factory")

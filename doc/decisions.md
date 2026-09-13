@@ -133,7 +133,7 @@
 
 以上保留装配前合同和静态情景检查。现已增加 [AgentRuntimeService](../app/agent/runtime.py)：在已装配应用对象上调用 `await app.state.agent_service.run(document_id=..., query=...)`，先通过共享 [DocumentTaskPreparer](../app/documents/preparation.py) 查证文档，再调用既有 `AgentRunService.execute`。Chat 也使用同一准备组件；归属真值仍由 `DocumentService.get_document` 提供。输入非法、文档不存在/越界/非 ready 或缺失单文档过滤，均在模型、工具及 Run 创建之前失败。
 
-- [composition root](../app/api/main.py) 显式提供 RAG 已创建的同一个 Retriever，复用 `findoc_runtime_documents_v1`、现有 Milvus 检索连接及关闭处理、同一个 OpenAI 兼容客户端。新增 Run/Event 库为 runtime 根目录下的 `agent-runs.db`；必需配置仍先于 BGE、SQLite、对象目录和 Milvus 初始化。后续装配失败时关闭已创建的检索连接。
+- [runtime composition factory](../app/api/runtime_factory.py) 显式提供 RAG 已创建的同一个 Retriever，复用 `findoc_runtime_documents_v1`、现有 Milvus 检索连接及关闭处理、同一个 OpenAI 兼容客户端。新增 Run/Event 库为 runtime 根目录下的 `agent-runs.db`；必需配置仍先于 BGE、SQLite、对象目录和 Milvus 初始化。后续装配失败时关闭已创建的检索连接。[默认 ASGI 入口](../app/api/main.py)保留既有启动命令。
 - `build_search_finance_tool_registry` 每次构造仅含搜索工具的独立表，复用既有 schema/handler；旧双工具 factory 复用该构造后再加入计算，保留离线行为。模型只能填写 `query/top_k`，核准范围从服务端准备结果进入 `ToolExecutionContext`，不从任务或资料文字恢复。runtime 不读取评测 fixture 或计算事实库。
 - 服务端固定 `max_steps=4`，不增加总结轮；每步供应商重试和请求 timeout 沿用原合同。内部入口的文档准备是异步，后续 loop 和 Run 持久化同步占用调用线程；尚未接 HTTP 线程适配、后台执行或强制取消。
 - 返回值仍为 `RecordedRunOutcome`，持久化内容仍是既有 Run/Event 安全摘要。loop success 和候选文本不等于已验证用户答案；计算能力限制的用户拒答映射、用户三态/引用验证、用户结果与终态同事务持久化、HTTP/UI 均待后续实现。
@@ -186,3 +186,14 @@
 - 重复终结冲突不等于 POST 请求幂等。相同 POST 重发可能创建新 Run 并再次执行，客户端不得隐式自动重试并宣称不会重复。保留单文档、仅搜索、四轮、配置 fail-fast、有限查询与引用校验、原子提交及旧数据读取边界；不增加模型链、计算装配、worker 或 Agent SSE。
 
 定向验证：`uv run --frozen pytest tests/test_agent_api.py tests/test_agent_runtime.py tests/test_agent_run_service.py tests/test_event_loop_boundary.py tests/test_chat_api.py tests/test_runtime_startup.py -q`：**98 passed、5 条 SWIG 弃用警告**；相关 Ruff、6 个相关源码文件 mypy（`--follow-imports=silent`）及 diff 检查通过。新增 HTTP 集成复用受控正式装配，保留真实文档准备、Retriever/工具/loop、结果验证及临时文件 SQLite，覆盖三态重开读回、前置零执行、范围、损坏/旧结果、真实提交/读库故障、零重跑、Events 白名单、重复 POST 和可选依赖。模型调用、提交及两类 GET 读取使用独立观察线程与受控屏障，验证在放行前 health 已响应且原请求未返回；原有直接阻塞/线程调度正反对照保留。未知异常外壳另有纯 stub 补充测试，不能替代接口集成。未调用真实模型、触碰用户 runtime 库、重跑历史评测或修改 UI；这些证据不证明真实模型质量、真实重依赖并发兼容性或完整产品验收。
+
+### Runtime 隔离启动与浏览器集成观察（2026-09-14）
+
+- 真实 composition 已移至无模块级装配的 [runtime_factory.py](../app/api/runtime_factory.py)。仅导入该模块不会读取 LLM 配置、预热 BGE、创建 SQLite／对象目录或打开 Milvus；显式隔离 Uvicorn factory 只接受必填绝对 `FINDOC_RUNTIME_ROOT`，并拒绝项目默认 runtime。`app.api.main:app` 仍在兼容入口中按默认目录装配，原启动命令和“配置校验→BGE 预热→存储／Milvus”顺序不变。
+- [受控浏览器装配](../tests/support/controlled_agent_app.py)明确使用 fake embedding、检索 store 与 provider，但保留真实文档准备、Retriever、搜索工具、loop、用户结果验证、FastAPI 和文件 SQLite。营业收入、员工平均年龄、净利润三个任务分别形成 answered、`empty_retrieval` refusal 和已提交 `provider_error` system_error；三态在重建应用后均由同一 Run GET 读回。受控 Events SQLite 故障只使历史区失败，不撤下 answered；关闭后端后的提交显示请求级错误，不冒充产品 system_error。
+- 浏览器受控 answered 为“2025年度营业收入为120万元。[1]”，引用受控资料第1页。刷新前后该 Run 只有一次 POST，刷新使用结果 GET 与 Events GET；这仍是跨层装配证据，不证明真实 embedding、Milvus 或模型质量。
+- 隔离真实观察使用新生成的 `synthetic_finance_smoke_20260914.pdf`。文件经实际解析和两页渲染核对，第1页含2025年度营业收入120万元与2024年度100万元，第2页含员工12人且明确无年龄信息。浏览器上传经真实 parser、BGE 和 Milvus 到达 ready，文档 ID 为 `b7d280a9785cfbc2917fda87e4db5281e8462cc4247e22c518bf37cc50ac0e99`。
+- 经当次授权只提交一次“查询2025年度营业收入”。配置的 `deepseek-v4-flash` 在第一个 provider attempt 返回 HTTP 401 鉴权失败；不可重试映射使实际网络尝试数为1。HTTP 201 只表示 Run 已提交；Run `fe168f2a-fcdd-4885-b60e-3d1258467082` 在独立 `agent-runs.db` 中保存执行终态 `provider_error`、产品 `system_error` 和唯一 `run_failed` Event，刷新 GET 原样读回且没有第二次 POST。未修复密钥或重跑。
+- 因模型在调用搜索工具前失败，本次没有真实 answered、工具检索、事实核对或引用闭环证据，不能据 ready、HTTP 201 或受控三态宣称真实 Agent 路径已通过。关闭真实 runtime 时另观察到 Milvus Lite gRPC `too_many_pings` GOAWAY 日志，但此前上传、持久读取和有序关闭均完成；本次不扩展为基础设施排错。
+
+本次定向验证：后端／API／受控装配／PDF组合 **97 passed、5 条 SWIG 弃用警告**；Node 24 前端 **42 passed**，oxlint、TypeScript/Vite build、相关 Ruff、2个 composition 源文件 mypy 与 `git diff --check` 通过。隔离改造首轮曾有 **34 passed、1 failed**：旧测试仍在兼容 `main` 模块替换已迁移的仓储符号；改为在真实 factory 所有者处替换后通过。上述结果不是全量测试，也不与历史98项相加。

@@ -97,13 +97,23 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleN
     from app.rag import openai_compatible_llm, store
     import app.api as api_package
 
+    startup_calls: list[str] = []
     document_repository = Mock(spec=DocumentRepository)
     document_repository.get.return_value = _record()
-    document_factory = Mock(return_value=document_repository)
-    object_factory = Mock(return_value=Mock(spec=ObjectStore))
+    document_factory = Mock(
+        side_effect=lambda _path: (
+            startup_calls.append("document_sqlite"), document_repository
+        )[1]
+    )
+    object_store = Mock(spec=ObjectStore)
+    object_factory = Mock(
+        side_effect=lambda _path: (startup_calls.append("object_store"), object_store)[1]
+    )
     model = Mock(spec=openai_compatible_llm.OpenAICompatibleLLMClient)
     model.complete.side_effect = [_tool_call(), _final()]
-    model_factory = Mock(return_value=model)
+    model_factory = Mock(
+        side_effect=lambda: (startup_calls.append("config"), model)[1]
+    )
     milvus = Mock()
     milvus.search.return_value = [
         [
@@ -121,11 +131,14 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleN
             }
         ]
     ]
-    client_factory = Mock(return_value=milvus)
+    client_factory = Mock(
+        side_effect=lambda _path: (startup_calls.append("milvus"), milvus)[1]
+    )
     embedding_calls: list[list[str]] = []
 
     def fake_embed(texts: list[str]) -> list[list[float]]:
         """记录预热/查询输入并返回固定向量，不加载 BGE 或下载模型。"""
+        startup_calls.append("bge")
         embedding_calls.append(list(texts))
         return [[0.0] * 1024 for _ in texts]
 
@@ -146,6 +159,7 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleN
 
     def temporary_run_repository(database_path: Path) -> object:
         """记录生产请求路径，但把实际 SQLite 写入重定向到 pytest 临时目录。"""
+        startup_calls.append("agent_sqlite")
         requested_run_paths.append(database_path)
         repository = real_run_repository(run_path)
         monkeypatch.setattr(repository, "start_run", Mock(wraps=repository.start_run))
@@ -154,16 +168,21 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleN
 
     monkeypatch.setattr(sqlite_run_repository, "SQLiteAgentRunRepository", temporary_run_repository)
     previous_main = sys.modules.pop("app.api.main", None)
+    previous_factory = sys.modules.pop("app.api.runtime_factory", None)
     had_main = hasattr(api_package, "main")
     previous_attribute = getattr(api_package, "main", None)
+    had_factory = hasattr(api_package, "runtime_factory")
+    previous_factory_attribute = getattr(api_package, "runtime_factory", None)
     try:
         module = importlib.import_module("app.api.main")
+        factory_module = sys.modules["app.api.runtime_factory"]
         app = module.app
         retriever = app.state.runtime_rag_resources.retriever
         retrieve_spy = Mock(wraps=retriever.retrieve)
         monkeypatch.setattr(retriever, "retrieve", retrieve_spy)
         yield SimpleNamespace(
             module=module,
+            factory_module=factory_module,
             app=app,
             service=app.state.agent_service,
             document_repository=document_repository,
@@ -173,6 +192,7 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleN
             model_factory=model_factory,
             milvus=milvus,
             client_factory=client_factory,
+            startup_calls=startup_calls,
             embedding_calls=embedding_calls,
             run_repository=run_repositories[0],
             run_path=run_path,
@@ -181,12 +201,19 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleN
         )
     finally:
         sys.modules.pop("app.api.main", None)
+        sys.modules.pop("app.api.runtime_factory", None)
         if previous_main is not None:
             sys.modules["app.api.main"] = previous_main
+        if previous_factory is not None:
+            sys.modules["app.api.runtime_factory"] = previous_factory
         if had_main:
             setattr(api_package, "main", previous_attribute)
         elif hasattr(api_package, "main"):
             delattr(api_package, "main")
+        if had_factory:
+            setattr(api_package, "runtime_factory", previous_factory_attribute)
+        elif hasattr(api_package, "runtime_factory"):
+            delattr(api_package, "runtime_factory")
 
 
 def test_production_runtime_shares_resources_and_passes_verified_scope(
@@ -195,11 +222,16 @@ def test_production_runtime_shares_resources_and_passes_verified_scope(
     """经正式装配运行检索，核对依赖身份、可信过滤、单工具 schema 和内核持久化。"""
     resources = runtime.app.state.runtime_rag_resources
     assert resources.rag_service._retriever is resources.retriever
+    assert runtime.startup_calls == [
+        "config", "bge", "document_sqlite", "object_store", "milvus", "agent_sqlite"
+    ]
     runtime.model_factory.assert_called_once_with()
     runtime.client_factory.assert_called_once_with(
-        str(runtime.module.DEFAULT_RUNTIME_ROOT / "milvus.db")
+        str(runtime.factory_module.DEFAULT_RUNTIME_ROOT / "milvus.db")
     )
-    assert runtime.requested_run_paths == [runtime.module.DEFAULT_RUNTIME_ROOT / "agent-runs.db"]
+    assert runtime.requested_run_paths == [
+        runtime.factory_module.DEFAULT_RUNTIME_ROOT / "agent-runs.db"
+    ]
     assert runtime.embedding_calls == [["runtime embedding startup check"]]
 
     recorded = asyncio.run(
@@ -583,17 +615,21 @@ def test_agent_assembly_failure_closes_existing_milvus(
 ) -> None:
     """Run 库构造失败时关闭已经创建的检索连接，不留下未受应用管理的所有者。"""
     monkeypatch.setattr(
-        runtime.module, "SQLiteAgentRunRepository", Mock(side_effect=OSError("test"))
+        runtime.factory_module,
+        "SQLiteAgentRunRepository",
+        Mock(side_effect=OSError("test")),
     )
     with pytest.raises(OSError, match="test"):
-        runtime.module.create_runtime_app(tmp_path / "failed-startup")
+        runtime.factory_module.create_runtime_app(tmp_path / "failed-startup")
     runtime.milvus.close.assert_called_once_with()
 
 
 def test_runtime_sources_do_not_import_eval_fixtures() -> None:
     """静态检查生产接线的直接导入；结合正式装配的独立命中证据保护评测隔离。"""
     project_root = Path(__file__).resolve().parents[1]
-    for relative_path in ("app/api/main.py", "app/agent/runtime.py", "app/agent/finance_tools.py"):
+    for relative_path in (
+        "app/api/runtime_factory.py", "app/agent/runtime.py", "app/agent/finance_tools.py"
+    ):
         tree = ast.parse((project_root / relative_path).read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
