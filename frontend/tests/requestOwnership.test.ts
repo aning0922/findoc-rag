@@ -4,7 +4,9 @@ import test from 'node:test'
 import {
   canChangeDocument,
   canStartRequest,
+  createAgentHistoryRequestSnapshot,
   createRequestSnapshot,
+  isCurrentAgentHistoryRequest,
   isCurrentRequest,
   isRequestDocumentReady,
   resolveActiveRequest,
@@ -86,4 +88,14 @@ test('请求快照拒绝空身份和非法请求号', () => {
     () => createRequestSnapshot(1, 'document-a', '   '),
     /问题/,
   )
+})
+
+test('历史 GET 使用无 query 的独立 Run/document 身份并拒绝迟到响应', () => {
+  const oldRequest = createAgentHistoryRequestSnapshot(1, 'run-1', 'document-a')
+  const currentRequest = createAgentHistoryRequestSnapshot(2, 'run-2', 'document-b')
+
+  assert.equal(Object.hasOwn(oldRequest, 'query'), false)
+  assert.equal(isCurrentAgentHistoryRequest(currentRequest, oldRequest), false)
+  assert.equal(isCurrentAgentHistoryRequest(currentRequest, currentRequest), true)
+  assert.equal(canStartRequest(currentRequest), false)
 })

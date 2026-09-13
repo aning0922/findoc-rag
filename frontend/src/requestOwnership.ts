@@ -5,10 +5,24 @@
  * 输出：供请求体、失效判断和迟到回调校验复用的快照。
  * 边界：requestId 只代表客户端请求身份，不等同于服务端 Agent run_id。
  */
-export interface RequestSnapshot {
+export interface RequestIdentity {
   requestId: number
   documentId: string
+}
+
+export interface RequestSnapshot extends RequestIdentity {
   query: string
+}
+
+/**
+ * 已知 Run 的历史读取身份；刻意不包含创建任务才有的 query。
+ *
+ * 输入：本地读取序号、已确认的 Run 与所属文档身份。
+ * 输出：供 GET 结果、Events 和迟到回调共同核对的不可变快照。
+ * 边界：它不是创建请求，不能拿当前表单问题补成一个假 query。
+ */
+export interface AgentHistoryRequestSnapshot extends RequestIdentity {
+  runId: string
 }
 
 /**
@@ -49,6 +63,21 @@ export function createRequestSnapshot(
   return Object.freeze({ requestId, documentId, query })
 }
 
+/** 建立一次已知 Run GET 的独立身份；不要求文档仍在 ready 列表。 */
+export function createAgentHistoryRequestSnapshot(
+  requestId: number,
+  runId: string,
+  documentId: string,
+): AgentHistoryRequestSnapshot {
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    throw new Error('历史读取请求号必须是正安全整数')
+  }
+  if (runId.trim().length === 0 || documentId.trim().length === 0) {
+    throw new Error('历史读取的 Run 和文档身份不能为空')
+  }
+  return Object.freeze({ requestId, runId, documentId })
+}
+
 /**
  * 判断提交入口能否占有新的活动请求。
  *
@@ -56,7 +85,7 @@ export function createRequestSnapshot(
  * @returns 没有活动请求时返回 true，否则拒绝重复提交。
  * @remarks 该入口判断立即生效，不能仅依赖下一次 React 渲染后的按钮禁用。
  */
-export function canStartRequest(activeRequest: RequestSnapshot | null): boolean {
+export function canStartRequest(activeRequest: RequestIdentity | null): boolean {
   return activeRequest === null
 }
 
@@ -67,7 +96,7 @@ export function canStartRequest(activeRequest: RequestSnapshot | null): boolean 
  * @returns 没有活动请求时返回 true，pending 时返回 false。
  * @remarks 单选框禁用只提供 UI 防线；事件入口仍必须调用本守卫。
  */
-export function canChangeDocument(activeRequest: RequestSnapshot | null): boolean {
+export function canChangeDocument(activeRequest: RequestIdentity | null): boolean {
   return activeRequest === null
 }
 
@@ -80,13 +109,15 @@ export function canChangeDocument(activeRequest: RequestSnapshot | null): boolea
  * @throws 两个模式同时有请求时抛出，暴露首版不允许的并发状态。
  */
 export function resolveActiveRequest(
-  first: RequestSnapshot | null,
-  second: RequestSnapshot | null,
-): RequestSnapshot | null {
-  if (first !== null && second !== null) {
+  ...requests: Array<RequestIdentity | null>
+): RequestIdentity | null {
+  const activeRequests = requests.filter(
+    (request): request is RequestIdentity => request !== null,
+  )
+  if (activeRequests.length > 1) {
     throw new Error('首版同一时间只能有一个活动请求')
   }
-  return first ?? second
+  return activeRequests[0] ?? null
 }
 
 /**
@@ -102,6 +133,20 @@ export function isCurrentRequest(
   candidate: RequestSnapshot,
 ): boolean {
   return activeRequest?.requestId === candidate.requestId
+    && activeRequest.documentId === candidate.documentId
+}
+
+/**
+ * 判断 GET/Events 回调是否仍属于当前历史读取。
+ *
+ * Run、文档和本地请求号均需一致，防止旧 Run 的事件附到新结果。
+ */
+export function isCurrentAgentHistoryRequest(
+  activeRequest: AgentHistoryRequestSnapshot | null,
+  candidate: AgentHistoryRequestSnapshot,
+): boolean {
+  return activeRequest?.requestId === candidate.requestId
+    && activeRequest.runId === candidate.runId
     && activeRequest.documentId === candidate.documentId
 }
 

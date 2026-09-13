@@ -1,7 +1,7 @@
 import {
   buildAgentResultView,
   parseAgentRunResponse,
-  type AgentViewState,
+  type AgentTerminalView,
 } from './agentResult.ts'
 
 /** Agent 首版允许选择的三个固定指标。 */
@@ -17,7 +17,7 @@ export type AgentMetric = typeof AGENT_METRICS[number]
 export type AgentFetch = (
   input: string,
   init: RequestInit,
-) => Promise<Pick<Response, 'ok' | 'json'>>
+) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>
 
 /**
  * 将受控年份和指标拼成后端当前支持的完整任务文本。
@@ -52,7 +52,7 @@ export async function createAgentRun(
   query: string,
   signal: AbortSignal,
   fetchImpl: AgentFetch = fetch,
-): Promise<AgentViewState> {
+): Promise<AgentTerminalView> {
   const response = await fetchImpl('/api/agent/runs', {
     method: 'POST',
     headers: {

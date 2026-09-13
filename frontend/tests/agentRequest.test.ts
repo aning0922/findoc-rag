@@ -26,6 +26,7 @@ test('POST 只发送一次固定 URL 和 document_id/query 两字段', async () 
     calls.push({ input, init })
     return {
       ok: true,
+      status: 201,
       json: async () => ({
         run_id: 'run-2025-revenue',
         document_id: 'document-a',
@@ -77,6 +78,7 @@ test('受控响应仍由已有 DTO 身份守卫拒绝错文档', async () => {
     callCount += 1
     return {
       ok: true,
+      status: 201,
       json: async () => ({
         run_id: 'run-wrong-document',
         document_id: 'document-b',
@@ -105,7 +107,7 @@ test('HTTP 失败只请求一次并交给页面显示 request_error', async () =
   let callCount = 0
   const fetchImpl: AgentFetch = async () => {
     callCount += 1
-    return { ok: false, json: async () => ({}) }
+    return { ok: false, status: 500, json: async () => ({}) }
   }
 
   await assert.rejects(

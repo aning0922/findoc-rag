@@ -99,6 +99,12 @@ export type AgentViewState =
   }
   | { status: 'request_error'; message: string }
 
+/** POST 或 GET 严格解析后唯一可能产生的三种已提交终态。 */
+export type AgentTerminalView = Extract<
+  AgentViewState,
+  { status: 'answered' | 'refusal' | 'system_error' }
+>
+
 /** Agent 页面尚未发起请求时的独立初始状态。 */
 export const INITIAL_AGENT_VIEW: AgentViewState = { status: 'idle' }
 
@@ -315,7 +321,7 @@ export function parseAgentRunResponse(
  * @returns 按 user_result.status 区分的独立页面状态。
  * @remarks HTTP 201 本身不会调用 answered 分支；拒答和错误不会携带旧正文/引用。
  */
-export function buildAgentResultView(response: AgentRunResponse): AgentViewState {
+export function buildAgentResultView(response: AgentRunResponse): AgentTerminalView {
   const result = response.user_result
   if (result.status === 'answered') {
     return {

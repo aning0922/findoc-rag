@@ -10,10 +10,14 @@ import {
 import {
   canChangeDocument,
   canStartRequest,
+  createAgentHistoryRequestSnapshot,
   createRequestSnapshot,
+  isCurrentAgentHistoryRequest,
   isCurrentRequest,
   isRequestDocumentReady,
   resolveActiveRequest,
+  type AgentHistoryRequestSnapshot,
+  type RequestIdentity,
   type RequestSnapshot,
 } from './requestOwnership'
 import {
@@ -28,6 +32,20 @@ import {
   createAgentRun,
   type AgentMetric,
 } from './agentRequest'
+import {
+  describeAgentHistoryError,
+  readAgentEvents,
+  readAgentRun,
+  type AgentHistoryEvent,
+} from './agentHistory.ts'
+import {
+  clearAgentRunIndex,
+  readAgentRunIndex,
+  rememberAgentRun,
+  removeAgentRun,
+  type AgentRunIndexStorage,
+  type AgentRunReference,
+} from './agentRunIndex.ts'
 import type { ChangeEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -69,7 +87,36 @@ interface ActiveAgentRequest {
   controller: AbortController
 }
 
+/** 已知 Run GET 使用不带 query 的独立活动身份，不受当前 ready 选择冒充授权。 */
+interface ActiveAgentHistoryRequest {
+  snapshot: AgentHistoryRequestSnapshot
+  controller: AbortController
+}
+
+type AgentResultOrigin = 'created' | 'history'
+
+type AgentHistoryReadState =
+  | { status: 'idle' }
+  | { status: 'loading'; reference: AgentRunReference }
+  | { status: 'ready'; reference: AgentRunReference }
+  | { status: 'error'; reference: AgentRunReference; message: string }
+
+type AgentEventsViewState =
+  | { status: 'idle' }
+  | { status: 'loading'; runId: string }
+  | { status: 'ready'; runId: string; events: AgentHistoryEvent[] }
+  | { status: 'error'; runId: string; message: string }
+
 type WorkbenchMode = 'rag' | 'agent'
+
+/** 访问 localStorage 可能被浏览器策略拒绝；失败时历史功能降级但结果仍可显示。 */
+function getAgentRunStorage(): AgentRunIndexStorage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
 
 /**
  * 确认 SSE data 是可以按字段读取的普通 JSON 对象。
@@ -135,13 +182,46 @@ function App() {
   const nextAgentRequestIdRef = useRef(1)
   // 保存最近一次实际提交的有限任务，避免结果被后续表单编辑改写含义
   const [submittedAgentQuery, setSubmittedAgentQuery] = useState<string | null>(null)
+  // 区分当前结果来自创建还是历史 GET，避免文档列表刷新误撤下历史结果
+  const agentResultOriginRef = useRef<AgentResultOrigin | null>(null)
+  // 保存 GET/Events 的独立活动身份和取消手柄，不制造假 query
+  const activeAgentHistoryRequestRef = useRef<ActiveAgentHistoryRequest | null>(null)
+  const nextAgentHistoryRequestIdRef = useRef(1)
+  const [agentHistoryRead, setAgentHistoryRead] = useState<AgentHistoryReadState>({ status: 'idle' })
+  const [agentEventsView, setAgentEventsView] = useState<AgentEventsViewState>({ status: 'idle' })
+  const [runIndexState, setRunIndexState] = useState(() => readAgentRunIndex(getAgentRunStorage()))
+  const runReferencesRef = useRef<AgentRunReference[]>(runIndexState.references)
+  const [runIndexNotice, setRunIndexNotice] = useState<string | null>(() => {
+    if (runIndexState.issue === 'invalid') {
+      return '已忽略本机索引中损坏、超限或不支持的记录。'
+    }
+    if (runIndexState.issue === 'unavailable') {
+      return '本机历史索引不可用；已取得的结果仍可在当前页面查看。'
+    }
+    return null
+  })
 
   /** 返回当前任一模式占有的请求快照，供共享入口阻止并发。 */
-  function getActiveRequestSnapshot(): RequestSnapshot | null {
+  function getActiveRequestSnapshot(): RequestIdentity | null {
     return resolveActiveRequest(
       activeChatRequestRef.current?.snapshot ?? null,
       activeAgentRequestRef.current?.snapshot ?? null,
+      activeAgentHistoryRequestRef.current?.snapshot ?? null,
     )
+  }
+
+  /** 把已验证 Run 置于本机索引首位；写入失败不撤下页面结果。 */
+  function rememberConfirmedRun(reference: AgentRunReference): void {
+    const saved = rememberAgentRun(
+      getAgentRunStorage(),
+      runReferencesRef.current,
+      reference,
+    )
+    runReferencesRef.current = saved.references
+    setRunIndexState({ references: saved.references, issue: saved.persisted ? 'none' : 'unavailable' })
+    if (!saved.persisted) {
+      setRunIndexNotice('本机历史索引写入失败；已验证结果仍然保留。')
+    }
   }
 
   /**
@@ -193,9 +273,11 @@ function App() {
       if (!activeRequestInvalid) {
         setChatView(INITIAL_CHAT_VIEW)
       }
-      if (!activeAgentRequestInvalid) {
+      if (!activeAgentRequestInvalid && agentResultOriginRef.current !== 'history') {
+        agentResultOriginRef.current = null
         setAgentView(INITIAL_AGENT_VIEW)
         setSubmittedAgentQuery(null)
+        setAgentEventsView({ status: 'idle' })
       }
     }
   }
@@ -320,7 +402,10 @@ function App() {
     setSelectedDocumentId(documentId)
     setChatView(INITIAL_CHAT_VIEW)
     setAgentView(INITIAL_AGENT_VIEW)
+    agentResultOriginRef.current = null
     setSubmittedAgentQuery(null)
+    setAgentHistoryRead({ status: 'idle' })
+    setAgentEventsView({ status: 'idle' })
   }
 
 
@@ -335,6 +420,9 @@ function App() {
       const activeAgentRequest = activeAgentRequestRef.current
       activeAgentRequestRef.current = null
       activeAgentRequest?.controller.abort()
+      const activeHistoryRequest = activeAgentHistoryRequestRef.current
+      activeAgentHistoryRequestRef.current = null
+      activeHistoryRequest?.controller.abort()
     }
   }, [])
 
@@ -366,7 +454,10 @@ function App() {
       (document) =>
         document.document_id === selectedDocumentId && document.status === 'ready'
     ) ?? null
-  const requestIsPending = chatView.status === 'streaming' || agentView.status === 'pending'
+  const requestIsPending = chatView.status === 'streaming'
+    || agentView.status === 'pending'
+    || agentHistoryRead.status === 'loading'
+    || agentEventsView.status === 'loading'
   const agentYearIsValid = /^[0-9]{4}$/.test(agentYear)
   const agentQueryPreview = agentYearIsValid
     ? buildAgentQuery(agentYear, agentMetric)
@@ -381,6 +472,11 @@ function App() {
     ? null
     : documents.find((document) => document.document_id === agentViewDocumentId)?.source_file
       ?? agentViewDocumentId
+  const displayedAgentRunId = agentView.status === 'answered'
+    || agentView.status === 'refusal'
+    || agentView.status === 'system_error'
+    ? agentView.runId
+    : null
 
   /**
    * 在没有活动请求时切换 RAG 或 Agent 工作区。
@@ -406,6 +502,109 @@ function App() {
     if (AGENT_METRICS.includes(metric)) {
       setAgentMetric(metric)
     }
+  }
+
+  /**
+   * 用已确认的 Run/document 身份读取服务端结果与安全历史。
+   *
+   * 结果 GET 成功后才展示；Events 失败只影响历史区域，且全程不会发送 POST。
+   */
+  async function loadKnownAgentRun(reference: AgentRunReference): Promise<void> {
+    if (!canStartRequest(getActiveRequestSnapshot())) {
+      return
+    }
+
+    const snapshot = createAgentHistoryRequestSnapshot(
+      nextAgentHistoryRequestIdRef.current,
+      reference.runId,
+      reference.documentId,
+    )
+    nextAgentHistoryRequestIdRef.current += 1
+    const controller = new AbortController()
+    activeAgentHistoryRequestRef.current = { snapshot, controller }
+    agentResultOriginRef.current = 'history'
+    setWorkbenchMode('agent')
+    setSubmittedAgentQuery(null)
+    setAgentView(INITIAL_AGENT_VIEW)
+    setAgentHistoryRead({ status: 'loading', reference })
+    setAgentEventsView({ status: 'idle' })
+
+    try {
+      const terminalView = await readAgentRun(reference, controller.signal)
+      if (!isCurrentAgentHistoryRequest(activeAgentHistoryRequestRef.current?.snapshot ?? null, snapshot)) {
+        return
+      }
+      setAgentView(terminalView)
+      setAgentHistoryRead({ status: 'ready', reference })
+      rememberConfirmedRun(reference)
+
+      setAgentEventsView({ status: 'loading', runId: reference.runId })
+      try {
+        const events = await readAgentEvents(reference, controller.signal)
+        if (!isCurrentAgentHistoryRequest(activeAgentHistoryRequestRef.current?.snapshot ?? null, snapshot)) {
+          return
+        }
+        setAgentEventsView({ status: 'ready', runId: reference.runId, events })
+      } catch {
+        if (!isCurrentAgentHistoryRequest(activeAgentHistoryRequestRef.current?.snapshot ?? null, snapshot)) {
+          return
+        }
+        setAgentEventsView({
+          status: 'error',
+          runId: reference.runId,
+          message: '历史事件暂时无法读取；已验证结果仍然保留。',
+        })
+      }
+    } catch (error) {
+      if (!isCurrentAgentHistoryRequest(activeAgentHistoryRequestRef.current?.snapshot ?? null, snapshot)) {
+        return
+      }
+      agentResultOriginRef.current = null
+      setAgentView(INITIAL_AGENT_VIEW)
+      setAgentHistoryRead({
+        status: 'error',
+        reference,
+        message: describeAgentHistoryError(error),
+      })
+    } finally {
+      if (isCurrentAgentHistoryRequest(activeAgentHistoryRequestRef.current?.snapshot ?? null, snapshot)) {
+        activeAgentHistoryRequestRef.current = null
+      }
+    }
+  }
+
+  useEffect(() => {
+    const mostRecentRun = runReferencesRef.current[0]
+    if (mostRecentRun !== undefined) {
+      // oxlint-disable-next-line react/set-state-in-effect -- 刷新恢复必须在挂载后启动外部 GET。
+      void loadKnownAgentRun(mostRecentRun)
+    }
+  }, [])
+
+  /** 移除一条本机查找引用；服务端 Run 和当前已验证结果都不会被删除。 */
+  function handleRemoveRunReference(runId: string): void {
+    if (!canStartRequest(getActiveRequestSnapshot())) {
+      return
+    }
+    const saved = removeAgentRun(getAgentRunStorage(), runReferencesRef.current, runId)
+    runReferencesRef.current = saved.references
+    setRunIndexState({ references: saved.references, issue: saved.persisted ? 'none' : 'unavailable' })
+    setRunIndexNotice(saved.persisted
+      ? '已移除本机引用；服务端 Run 和当前显示结果未被删除。'
+      : '本机索引更新失败；服务端 Run 和当前显示结果未被删除。')
+  }
+
+  /** 清除本应用唯一索引键，不清空同源其他应用数据或删除服务端 Run。 */
+  function handleClearRunIndex(): void {
+    if (!canStartRequest(getActiveRequestSnapshot())) {
+      return
+    }
+    const cleared = clearAgentRunIndex(getAgentRunStorage())
+    runReferencesRef.current = []
+    setRunIndexState({ references: [], issue: cleared ? 'none' : 'unavailable' })
+    setRunIndexNotice(cleared
+      ? '已清除此浏览器中的 FinDoc Run 引用；服务端 Run 未被删除。'
+      : '无法清除本机索引；服务端 Run 和当前显示结果未受影响。')
   }
 
   /**
@@ -598,8 +797,11 @@ function App() {
     nextAgentRequestIdRef.current += 1
     const controller = new AbortController()
     activeAgentRequestRef.current = { snapshot: requestSnapshot, controller }
+    agentResultOriginRef.current = 'created'
     setSubmittedAgentQuery(taskQuery)
     setAgentView(buildAgentPendingView(requestSnapshot.requestId, selectedId))
+    setAgentHistoryRead({ status: 'idle' })
+    setAgentEventsView({ status: 'idle' })
 
     try {
       const terminalView = await createAgentRun(
@@ -619,6 +821,32 @@ function App() {
         return
       }
       setAgentView(terminalView)
+      const confirmedReference = {
+        runId: terminalView.runId,
+        documentId: terminalView.documentId,
+      }
+      rememberConfirmedRun(confirmedReference)
+      setAgentEventsView({ status: 'loading', runId: confirmedReference.runId })
+      try {
+        const events = await readAgentEvents(confirmedReference, controller.signal)
+        if (!isCurrentRequest(activeAgentRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+          return
+        }
+        setAgentEventsView({
+          status: 'ready',
+          runId: confirmedReference.runId,
+          events,
+        })
+      } catch {
+        if (!isCurrentRequest(activeAgentRequestRef.current?.snapshot ?? null, requestSnapshot)) {
+          return
+        }
+        setAgentEventsView({
+          status: 'error',
+          runId: confirmedReference.runId,
+          message: '历史事件暂时无法读取；已验证结果仍然保留。',
+        })
+      }
     } catch {
       if (!isCurrentRequest(activeAgentRequestRef.current?.snapshot ?? null, requestSnapshot)) {
         return
@@ -827,8 +1055,68 @@ function App() {
             <span className="mode-label">Agent · JSON</span>
           </div>
 
+          <section className="run-history-panel" aria-labelledby="run-history-title">
+            <div className="section-heading-row">
+              <div>
+                <h4 id="run-history-title">本机已知 Run</h4>
+                <p className="section-description">
+                  这里只保存 Run 与文档身份，作为服务器查找线索；不是答案缓存或读取授权。
+                </p>
+              </div>
+              {(runIndexState.references.length > 0 || runIndexState.issue === 'invalid') && (
+                <button
+                  className="secondary-button compact-button"
+                  type="button"
+                  disabled={requestIsPending}
+                  onClick={handleClearRunIndex}
+                >
+                  清除本机索引
+                </button>
+              )}
+            </div>
+            {runIndexNotice !== null && (
+              <p className="message neutral" role="status">{runIndexNotice}</p>
+            )}
+            {runIndexState.references.length === 0
+              ? <p className="empty-state">此浏览器还没有已确认的 Run 引用。</p>
+              : (
+                <ul className="run-reference-list">
+                  {runIndexState.references.map((reference, index) => (
+                    <li key={reference.runId}>
+                      <div>
+                        <strong>{index === 0 ? '最近查看' : '已知 Run'}</strong>
+                        <span><code>{reference.runId}</code></span>
+                        <span>文档：<code>{reference.documentId}</code></span>
+                      </div>
+                      <div className="run-reference-actions">
+                        <button
+                          className="secondary-button compact-button"
+                          type="button"
+                          disabled={requestIsPending}
+                          onClick={() => void loadKnownAgentRun(reference)}
+                        >
+                          GET 读取
+                        </button>
+                        <button
+                          className="text-button compact-button"
+                          type="button"
+                          disabled={requestIsPending}
+                          onClick={() => handleRemoveRunReference(reference.runId)}
+                        >
+                          移除本机引用
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            <p className="history-boundary">
+              本机记录不跨浏览器或设备；移除引用不会删除服务器上的 Run。
+            </p>
+          </section>
+
           {selectedReadyDocument === null && (
-            <p className="message neutral">请先选择一篇 ready 文档</p>
+            <p className="message neutral">创建新任务前，请先选择一篇 ready 文档。</p>
           )}
 
           <div className="agent-form">
@@ -883,7 +1171,23 @@ function App() {
                 : '创建并执行 Agent Run'}
           </button>
 
-          {agentView.status === 'idle' && (
+          {agentHistoryRead.status === 'loading' && (
+            <section className="message neutral" role="status" aria-live="polite">
+              <strong>正在读取已保存结果</strong>
+              <p>Run：{agentHistoryRead.reference.runId}</p>
+              <p>本次只发送 GET，不重新执行任务。</p>
+            </section>
+          )}
+          {agentHistoryRead.status === 'error' && (
+            <section className="message error" role="alert">
+              <strong>无法恢复已知 Run</strong>
+              <p>{agentHistoryRead.message}</p>
+              <p>Run：{agentHistoryRead.reference.runId}</p>
+            </section>
+          )}
+          {agentView.status === 'idle'
+            && agentHistoryRead.status !== 'loading'
+            && agentHistoryRead.status !== 'error' && (
             <p className="empty-state">提交后将在这里显示回答、正常拒答或错误。</p>
           )}
           {agentView.status === 'pending' && (
@@ -903,7 +1207,10 @@ function App() {
               <dl className="result-identity">
                 <div><dt>资料</dt><dd>{agentViewDocumentName}</dd></div>
                 <div><dt>Run ID</dt><dd><code>{agentView.runId}</code></dd></div>
-                <div><dt>任务</dt><dd>{submittedAgentQuery}</dd></div>
+                <div>
+                  <dt>任务</dt>
+                  <dd>{submittedAgentQuery ?? '历史 Run（未保存任务文本）'}</dd>
+                </div>
               </dl>
               <p className="answer-copy">{agentView.content}</p>
               <h4>引用</h4>
@@ -923,6 +1230,7 @@ function App() {
               <p>{agentView.message}</p>
               <p>原因：{agentView.reason}</p>
               <p>资料：{agentViewDocumentName} · Run ID：{agentView.runId}</p>
+              <p>任务：{submittedAgentQuery ?? '历史 Run（未保存任务文本）'}</p>
             </section>
           )}
           {agentView.status === 'system_error' && (
@@ -931,6 +1239,7 @@ function App() {
               <p>{agentView.message}</p>
               <p>错误码：{agentView.errorCode}</p>
               <p>资料：{agentViewDocumentName} · Run ID：{agentView.runId}</p>
+              <p>任务：{submittedAgentQuery ?? '历史 Run（未保存任务文本）'}</p>
             </section>
           )}
           {agentView.status === 'request_error' && (
@@ -938,6 +1247,46 @@ function App() {
               <strong>请求错误</strong>
               <p>{agentView.message}</p>
               {submittedAgentQuery !== null && <p>提交任务：{submittedAgentQuery}</p>}
+            </section>
+          )}
+
+          {displayedAgentRunId !== null && (
+            <section className="event-history" aria-labelledby="event-history-title">
+              <div className="section-heading-row">
+                <div>
+                  <p className="eyebrow">history projection</p>
+                  <h4 id="event-history-title">安全历史事件</h4>
+                </div>
+                <span className="mode-label">不是实时进度</span>
+              </div>
+              <p className="section-description">
+                事件只说明执行后留下的有限摘要；不表示思维链、精确耗时或崩溃恢复。
+              </p>
+              {agentEventsView.status === 'loading'
+                && agentEventsView.runId === displayedAgentRunId && (
+                <p className="message neutral" role="status">正在读取历史事件……</p>
+              )}
+              {agentEventsView.status === 'error'
+                && agentEventsView.runId === displayedAgentRunId && (
+                <p className="message warning" role="status">{agentEventsView.message}</p>
+              )}
+              {agentEventsView.status === 'ready'
+                && agentEventsView.runId === displayedAgentRunId
+                && (agentEventsView.events.length === 0
+                  ? <p className="empty-state">该 Run 没有可展示的安全历史事件。</p>
+                  : (
+                    <ol className="event-list">
+                      {agentEventsView.events.map((event) => (
+                        <li key={event.sequence}>
+                          <span className="event-sequence">{event.sequence}</span>
+                          <div>
+                            <strong>{event.executionEventType}</strong>
+                            <p>{event.summary}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  ))}
             </section>
           )}
         </section>
