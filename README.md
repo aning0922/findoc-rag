@@ -6,7 +6,7 @@
 > 已使用真实文本层 PDF、真实 parser、真实 bge-m3、runtime Milvus Lite、真实 LLM、SSE 和浏览器完成一次成功回答与引用闭环并验证范围外拒答；真实模型工具smoke也已走通`user→assistant→tool→assistant`与确定性`25.00%`计算结果。
 > 当前仍是单机学习原型，不具备任务恢复、身份认证、多用户隔离或生产级存储与队列能力。
 
-Agent 已接入 runtime，并把经过验证的用户结果与 Run 终态、唯一结束事件原子保存到 SQLite；重开仓储可按可信 workspace/run 读取，无须重跑模型或检索。复用上传库的 Retriever 与模型客户端，服务端查证单文档后只开放 `search_finance_docs`。当前请求限定为 `查询{四位年份}年度{指标}`，指标仅含营业收入、净利润、员工平均年龄；结果区分回答、可核证拒答与安全系统错误。同步 Agent HTTP 与有限 React 工作台已接通，支持创建、已知 Run 刷新 GET 和安全历史投影；受控浏览器装配已通过真实业务代码与临时 SQLite 验证三态和请求错误。一次隔离真实上传已到 ready，但首个 Agent provider 调用因鉴权失败形成已保存的 `system_error`，因此上传文档后的真实 Agent 回答、检索和引用闭环仍未验证；计算也未接入该 runtime。范围与证据见[单文档任务合同及实现记录](doc/decisions.md#agent-单文档任务合同装配前约定)。
+Agent 已接入 runtime，并把经过验证的用户结果与 Run 终态、唯一结束事件原子保存到 SQLite；重开仓储可按可信 workspace/run 读取，无须重跑模型或检索。复用上传库的 Retriever 与模型客户端，服务端查证单文档后只开放 `search_finance_docs`。当前请求限定为 `查询{四位年份}年度{指标}`，指标仅含营业收入、净利润、员工平均年龄；结果区分回答、可核证拒答与安全系统错误。同步 Agent HTTP 与有限 React 工作台已接通，支持创建、已知 Run 刷新 GET 和安全历史投影；受控浏览器装配已通过真实业务代码与临时 SQLite 验证三态和请求错误。隔离真实上传经 parser、bge-m3 和 Milvus 到达 ready；首次 Agent 调用的鉴权失败被保存为 `system_error`，随后在凭据更新及独立授权的新 Run 中，真实模型调用搜索工具并回答2025年度营业收入120万元，引用经索引核对来自本次合成资料第1页，刷新仅用 GET 读回。该单一成功样例不代表泛化质量、生产可靠性或多用户授权；计算也未接入该 runtime。范围与证据见[单文档任务合同及实现记录](doc/decisions.md#agent-单文档任务合同装配前约定)。
 
 ## 项目目标
 

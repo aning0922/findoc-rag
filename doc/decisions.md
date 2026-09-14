@@ -196,4 +196,12 @@
 - 经当次授权只提交一次“查询2025年度营业收入”。配置的 `deepseek-v4-flash` 在第一个 provider attempt 返回 HTTP 401 鉴权失败；不可重试映射使实际网络尝试数为1。HTTP 201 只表示 Run 已提交；Run `fe168f2a-fcdd-4885-b60e-3d1258467082` 在独立 `agent-runs.db` 中保存执行终态 `provider_error`、产品 `system_error` 和唯一 `run_failed` Event，刷新 GET 原样读回且没有第二次 POST。未修复密钥或重跑。
 - 因模型在调用搜索工具前失败，本次没有真实 answered、工具检索、事实核对或引用闭环证据，不能据 ready、HTTP 201 或受控三态宣称真实 Agent 路径已通过。关闭真实 runtime 时另观察到 Milvus Lite gRPC `too_many_pings` GOAWAY 日志，但此前上传、持久读取和有序关闭均完成；本次不扩展为基础设施排错。
 
+凭据由用户在本地更新后，进行了另一次独立授权的有限续办；它创建新 Run，不修改或续跑上述401失败记录。
+
+- 启动进程继续通过 `--env-file .env` 和必填绝对 `FINDOC_RUNTIME_ROOT` 使用同一隔离目录、ready 文档与 `deepseek-v4-flash`；没有重新生成、上传或摄取文档。调用前只核对配置来源、必填项存在性及安全的模型／主机／timeout，未打印密钥、执行连通探测或更换 provider。
+- 浏览器只新增一次 POST“查询2025年度营业收入”。新 Run `aeb5ede6-77fe-4d89-b264-6ab88922fea0` 为执行 `success` 和产品 `answered`，保存正文“2025年度营业收入：120万元。[2]”及引用 `synthetic_finance_smoke_20260914.pdf` 第1页、chunk `5b2ed13fdb7e231496d11cf46d5d08fe2ec65d37bd32937b83dffc9719b800d1`；Events 按序为 `tool_requested/tool_succeeded/run_succeeded`。旧 Run `fe168f2a-fcdd-4885-b60e-3d1258467082` 仍为 `provider_error/system_error` 和唯一 `run_failed`，未被覆盖。
+- 浏览器刷新后只观察到文档 GET、同一新 Run 的结果 GET 与 Events GET，没有第二次 POST；页面从保存记录恢复相同文档、正文和引用。当前适配器不保存完整 provider usage，成功 attempt 数未单独记录，因此不据 Events 编造精确计费次数。
+- 服务关闭后的首次 Milvus 直接 query 因 collection 处于 `released` 而失败；按真实启动边界显式 `load_collection` 后，只读查询上述唯一 chunk 成功。索引记录的 workspace、document、source_file、page 均与本次 Run 一致，正文明确包含“2025年度营业收入：120万元”和“金额单位：万元”，因此引用不仅结构存在，也真实支持答案的事实、期间和单位。
+- 本续办补齐了一个受限合成任务的真实上传→模型工具调用→检索→结果验证／持久化→浏览器展示→刷新 GET 闭环。它不证明其他问题或文档的泛化质量，也不提供生产级身份、多租户、后台耐久、费用 quota、发布 Gate 或最终部署能力。Milvus Lite 关闭时仍可观察到既有 `too_many_pings` GOAWAY 日志，本次闭环未受影响，未扩展基础设施范围。
+
 本次定向验证：后端／API／受控装配／PDF组合 **97 passed、5 条 SWIG 弃用警告**；Node 24 前端 **42 passed**，oxlint、TypeScript/Vite build、相关 Ruff、2个 composition 源文件 mypy 与 `git diff --check` 通过。隔离改造首轮曾有 **34 passed、1 failed**：旧测试仍在兼容 `main` 模块替换已迁移的仓储符号；改为在真实 factory 所有者处替换后通过。上述结果不是全量测试，也不与历史98项相加。
