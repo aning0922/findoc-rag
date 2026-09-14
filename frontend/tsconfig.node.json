@@ -20,6 +20,8 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
+    "e2e/**/*.ts",
+    "playwright.config.ts",
     "vite.config.ts",
     "tests/**/*.test.ts"
   ]

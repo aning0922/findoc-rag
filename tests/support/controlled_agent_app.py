@@ -16,7 +16,7 @@ from app.agent.run_models import RunEvent
 from app.agent.sqlite_run_repository import SQLiteAgentRunRepository
 from app.agent.tool_loop import Message
 from app.api.app import create_app
-from app.api.runtime_factory import DEFAULT_RUNTIME_ROOT
+from app.api.runtime_paths import DEFAULT_RUNTIME_ROOT
 from app.documents.local_object_store import LocalObjectStore
 from app.documents.models import DocumentRecord, DocumentStatus
 from app.documents.preparation import DocumentTaskPreparer

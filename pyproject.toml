@@ -30,6 +30,15 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]
+e2e = [
+    "fastapi",
+    "httpx",
+    "openai",
+    "pytest",
+    "python-multipart",
+    "ruff",
+    "uvicorn[standard]",
+]
 
 [tool.ruff]
 line-length = 100

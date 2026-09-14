@@ -37,3 +37,7 @@ mineru_out/
 
 *.db
 eval/agent_results/*.sqlite3
+
+# 浏览器测试失败报告与 trace
+frontend/playwright-report/
+frontend/test-results/

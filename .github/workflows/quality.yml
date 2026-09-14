@@ -1,0 +1,63 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  controlled-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python and uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.11.25"
+          python-version: "3.12"
+
+      - name: Install minimal controlled-test Python dependencies
+        run: uv sync --only-group e2e --frozen
+
+      - name: Run controlled backend checks
+        run: |
+          .venv/bin/python -m pytest tests/test_controlled_agent_app.py
+          .venv/bin/ruff check app/api/runtime_paths.py app/api/runtime_factory.py tests/support/controlled_agent_app.py tests/test_controlled_agent_app.py tests/test_runtime_startup.py
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend checks and build
+        working-directory: frontend
+        run: |
+          npm test
+          npm run lint
+          npm run build
+
+      - name: Install Chromium only
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run controlled browser E2E
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

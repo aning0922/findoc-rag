@@ -13,6 +13,7 @@ from app.agent.run_service import AgentRunService
 from app.agent.runtime import AgentRuntimeService, RUNTIME_AGENT_CONFIG_VERSION
 from app.agent.sqlite_run_repository import SQLiteAgentRunRepository
 from app.api.app import create_app
+from app.api.runtime_paths import DEFAULT_RUNTIME_ROOT
 from app.chat.service import ChatService
 from app.documents.fast_pdf_parser import parse_fast_pdf_bytes
 from app.documents.in_process_dispatcher import InProcessTaskDispatcher
@@ -29,8 +30,6 @@ from app.rag.service import RAGService
 from app.rag.store import MilvusSearchStore, ensure_document_collection, get_client
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_RUNTIME_ROOT = PROJECT_ROOT / "data" / "runtime"
 RUNTIME_COLLECTION_NAME = "findoc_runtime_documents_v1"
 DEMO_WORKSPACE_ID = "demo"
 RUNTIME_DATA_VERSION = "runtime-v1"

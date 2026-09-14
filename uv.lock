@@ -1251,6 +1251,15 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
+e2e = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "openai" },
+    { name = "pytest" },
+    { name = "python-multipart" },
+    { name = "ruff" },
+    { name = "uvicorn", extra = ["standard"] },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1278,6 +1287,15 @@ dev = [
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
+]
+e2e = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "openai" },
+    { name = "pytest" },
+    { name = "python-multipart" },
+    { name = "ruff" },
+    { name = "uvicorn", extras = ["standard"] },
 ]
 
 [[package]]
