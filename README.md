@@ -217,6 +217,14 @@ uv run pytest -q
 
 历史后端测试曾为 `330 passed`；首次公开 clean clone 暴露私有数据依赖，修复后无私有数据的隔离 candidate 为 `330 passed, 1 skipped`，作者含本地数据的检查为 `331 passed`。历史工具调用相关定向测试为 `70 passed`；另有 Ruff、`mypy app`（45个源码文件）、前端6项测试及 Node 24下构建和 lint 证据。各版本与环境身份见[发布证据](doc/release_evidence_v0.1.0.md)，不将这些历史结果称为当前 HEAD 的全量质量门。测试只证明已覆盖行为，不替代真实检索、答案事实或引用语义核验。
 
+受控浏览器回归使用Playwright `1.63.0`的单Chromium、单worker、零重试配置。它会启动独立Uvicorn和Vite服务，并为每次运行创建临时SQLite runtime；embedding、检索store和provider为确定性替身，但浏览器、Vite代理、HTTP、Agent loop、结果验证与持久化仍走真实代码。当前两条E2E覆盖：创建answered后刷新只以GET恢复同一Run，以及先创建answered再主动创建`empty_retrieval` refusal、撤下当前答案／引用并在刷新时GET恢复第二个Run。运行需要已安装前端依赖、Chromium和一个包含`e2e`依赖组的独立或完整Python环境：
+
+```bash
+npm --prefix frontend run test:e2e
+```
+
+测试进程会移除LLM凭据环境变量且Vite测试模式不加载`.env`，不会调用公网模型、BGE或Milvus。HTML报告和失败trace位于`frontend/playwright-report/`；GitHub Actions失败时上传该目录。本地通过不等于远端Actions、真实模型／检索质量、多浏览器或生产可靠性已验证。
+
 冻结Agent评测可通过以下命令运行；每次结果使用唯一文件名，已有结果不会被覆盖：
 
 ```bash
@@ -273,7 +281,7 @@ app/
 ├── chat/               # 服务端可信请求准备与同步RAG的异步边界
 ├── gateway/            # 预留，尚未实现
 └── agent/              # 原生受控loop、财报工具、LangChain薄适配、Run/Event与Agent评测
-frontend/               # React/TypeScript/Vite单页薄壳与SSE流解析测试
+frontend/               # React/TypeScript/Vite单页薄壳、纯测试与受控Playwright E2E
 scripts/                # 解析、分块、Embedding 和 Milvus 实验脚本
 experiments/            # 分块、标准库向量检索与bge-m3小规模对照
 tests/                  # smoke test、契约测试与理解Gate测试
