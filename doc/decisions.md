@@ -205,3 +205,39 @@
 - 本续办补齐了一个受限合成任务的真实上传→模型工具调用→检索→结果验证／持久化→浏览器展示→刷新 GET 闭环。它不证明其他问题或文档的泛化质量，也不提供生产级身份、多租户、后台耐久、费用 quota、发布 Gate 或最终部署能力。Milvus Lite 关闭时仍可观察到既有 `too_many_pings` GOAWAY 日志，本次闭环未受影响，未扩展基础设施范围。
 
 本次定向验证：后端／API／受控装配／PDF组合 **97 passed、5 条 SWIG 弃用警告**；Node 24 前端 **42 passed**，oxlint、TypeScript/Vite build、相关 Ruff、2个 composition 源文件 mypy 与 `git diff --check` 通过。隔离改造首轮曾有 **34 passed、1 failed**：旧测试仍在兼容 `main` 模块替换已迁移的仓储符号；改为在真实 factory 所有者处替换后通过。上述结果不是全量测试，也不与历史98项相加。
+
+## G1 同文档两期营业收入 Workflow 合同（2026-09-19）
+
+### 范围与真值
+
+- 输入范围由程序固定为服务端已核准的单一 `workspace_id/document_id`、营业收入和 2024/2025 两个期间。模型或文档文字不能改写这些范围。
+- `RevenueCandidate` 是待核对的解释，不是计算真值。它保留范围、唯一候选引用、chunk、文件、页码、期间、`Decimal` 数值和可能尚未知的规范化单位。`source_ref` 标识单条候选事实，不等同于 `chunk_id`；同一 chunk 可同时支持两个期间。
+- 只有操作者对当前完整候选发出明确确认动作，程序再次核对阶段后，才会创建现有 `FinancialFact`。调用方不能把候选原地改成已确认事实。
+- 增长率真值只由现有 `CalculateFinancialMetricTool` 读取两条已确认事实后生成。模型不能提交裸数值、选择公式、覆盖结果或自报来源。
+
+### 状态、步骤与合法转移
+
+| 阶段 | 步骤输入 | 程序写入 | 唯一合法后继 |
+|---|---|---|---|
+| `collecting_candidates` | 已核准范围内的结构化候选 | 候选快照，或稳定失败码 | `awaiting_confirmation` 或 `failed` |
+| `awaiting_confirmation` | 操作者对当前候选的明确确认 | 两条新建的 `FinancialFact` | `ready_for_calculation` |
+| `ready_for_calculation` | 已确认事实 | 公式结果与两条来源，或计算拒绝码 | `completed` 或 `failed` |
+| `completed` / `failed` | 无 | 无 | 终态，不允许继续转移 |
+
+所有转移由项目函数返回新的不可变 `RevenueWorkflowState`。跳过确认、对终态继续执行或从错误阶段调用步骤属于程序员误用，抛出 `RevenueWorkflowTransitionError` 并不产生新状态。
+
+### 固定程序规则与模型可选动作
+
+- 程序固定：范围核对、期间齐全、候选冲突、单位兼容、确认准入、状态转移、公式、舍入、零分母、终态和步数上限。
+- 模型可选：在后续真实事实链中可用于提出“哪段证据可能是营业收入”的候选，或把已确定结果组织成文本；不得确认事实、选冲突值、决定准入或代替程序计算。
+- 本次纯 Python 变体不调用模型，因此不存在迭代调度。将来若编排器调用模型，超出固定步数必须进入 `step_limit` 失败终态，不能自行循环。
+
+### 失败和拒绝出口
+
+- 任一目标期间没有候选：`missing_candidate`。
+- 当前最小变体中，任一期间出现多条候选：`candidate_conflict`，不让模型自动选择。相同值的多条证据如何合并留给 G2a 细化。
+- 候选越出服务端核准的工作区或文档：`scope_mismatch`。
+- 候选数量检查通过后，任一期单位不明：`unit_unknown`，不得确认或计算。两期规范化单位均已知但不一致：`unit_conflict`。
+- 计算器拒绝期间顺序或零分母时，Workflow 保留现有 `FinancialMetricErrorCode` 值并进入 `failed`。
+
+成功终态保留 `20.00 / PERCENT / revenue_growth_rate_v1` 等程序结果，以及两条已确认事实的 `source_ref/chunk_id/source_file/page`。它只证明状态与准入合同，不证明真实文档抽取、持久确认、模型质量或生产 runtime 已接通。
