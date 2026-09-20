@@ -1,0 +1,76 @@
+{
+  "date": "2026-09-20",
+  "source_base_commit": "96e02448abd83ad37e986c47888ebb558c692632",
+  "source_uncommitted": true,
+  "platform": "linux/arm64",
+  "commands": [
+    "docker build --platform linux/arm64 --target api --progress plain -t findoc-api:local .",
+    "docker build --platform linux/arm64 --target web --progress plain -t findoc-web:local ."
+  ],
+  "build_exit_codes": {
+    "api": 0,
+    "web": 0
+  },
+  "images": [
+    {
+      "tags": [
+        "findoc-api:local"
+      ],
+      "id": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+      "os": "linux",
+      "architecture": "arm64",
+      "user": "10001:10001",
+      "entrypoint": [
+        "/app/.venv/bin/uvicorn"
+      ],
+      "cmd": [
+        "app.api.runtime_factory:create_isolated_runtime_app_from_env",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "1"
+      ]
+    },
+    {
+      "tags": [
+        "findoc-web:local"
+      ],
+      "id": "sha256:76f4e3b822048047a09b80f1b3851f336990f3b5a7043baf09be038af6344fc9",
+      "os": "linux",
+      "architecture": "arm64",
+      "user": "101",
+      "entrypoint": [
+        "/docker-entrypoint.sh"
+      ],
+      "cmd": [
+        "nginx",
+        "-g",
+        "daemon off;"
+      ]
+    }
+  ],
+  "inputs_sha256": {
+    "Dockerfile": "4498b2b4c4a19e66bcc720c24070d48c699763750abb533c60f7c69c3a72d2b2",
+    ".dockerignore": "2c940ac10d228072a43846f3324226c71610a4818272fa3ea822dca2941fa58a",
+    "compose.yaml": "05e572373f3414e9098832c6c50f8f0b006b7ffac81c2981b27a8e37b0fbbb5b",
+    "deploy/nginx.conf": "4aa85af09495e275730f308931fbd93c7a46fe495deefe3ae848f66d6188cf48",
+    "deploy/container.env.example": "8940e616d436451c1fa8c6af4a92093f8a90a36dce17804dbba71e40068b375b",
+    "pyproject.toml": "16367b618fc1dc9c12cf8b36e84a3cc2223ac1d102fcc84d330f635b6a0095bb",
+    "uv.lock": "bf47d5bc1a19658c65da21e09f445881d351b30504f949266e8a243702ee701a",
+    "frontend/package.json": "435f22df8f259247a8932597eb9a5d85480404480dcf966ce13cd1786dfac01d",
+    "frontend/package-lock.json": "93da181e39f5d8592675c86d83c6268e790595a5545949d554b5b56308b1e56b"
+  },
+  "not_verified": [
+    "Application startup",
+    "BGE weight loading or inference",
+    "Milvus runtime initialization",
+    "Compose service networking",
+    "Runtime volumes and permissions",
+    "Health/readiness",
+    "Synthetic upload",
+    "Restart readback"
+  ]
+}

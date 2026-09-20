@@ -1,0 +1,34 @@
+name: findoc-d1
+
+services:
+  api:
+    platform: linux/arm64
+    build:
+      context: .
+      target: api
+    image: findoc-api:local
+    env_file:
+      - path: .env.container
+        required: false
+    environment:
+      FINDOC_RUNTIME_ROOT: /var/lib/findoc
+      HF_HOME: /var/cache/findoc/huggingface
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: "1"
+    volumes:
+      - runtime-data:/var/lib/findoc
+      - model-cache:/var/cache/findoc
+
+  web:
+    platform: linux/arm64
+    build:
+      context: .
+      target: web
+    image: findoc-web:local
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - api
+
+volumes:
+  runtime-data:
+  model-cache:

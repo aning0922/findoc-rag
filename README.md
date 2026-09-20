@@ -155,7 +155,7 @@ Day44在不重建Retriever或workspace过滤的前提下，新增供应商无关
 - React 19 / TypeScript / Vite
 - Node.js 24
 
-LangChain Agent、LangChain provider集成、LangGraph、PostgreSQL、Redis、S3、Docker Compose 和生产级身份系统属于后续路线，不是当前已实现技术栈。
+LangChain Agent、LangChain provider集成、LangGraph、PostgreSQL、Redis、S3和生产级身份系统属于后续路线，不是当前已实现技术栈。Docker Compose 目前仅有容器交付候选，验证状态见下文。
 
 ## 快速开始
 
@@ -170,6 +170,10 @@ uv sync
 ```
 
 依赖包含文档解析和本地 Embedding 组件，首次安装及首次下载 bge-m3 可能耗时较长。
+
+当前 HTTP 上传使用 PyMuPDF/pdfplumber 的快速解析路径。完整 MinerU 工具改为可选依赖，需要运行该工具时使用 `uv sync --extra mineru`；读取已有 MinerU JSON 的适配器不需要安装完整工具。
+
+容器候选采用 Linux ARM64、Python API 与静态前端两个服务，配置及验证边界见[容器交付候选](doc/container_delivery.md)。尚未完成启动、health及重启读回验收，不作为已验证容器交付能力。
 
 ### 2. 生成公开合成 PDF 并检查解析
 

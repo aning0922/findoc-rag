@@ -1,0 +1,233 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.37kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.12-slim-bookworm
+#2 ...
+
+#3 [internal] load metadata for ghcr.io/astral-sh/uv:0.11.25
+#3 DONE 1.3s
+
+#2 [internal] load metadata for docker.io/library/python:3.12-slim-bookworm
+#2 DONE 1.6s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 462B done
+#4 DONE 0.0s
+
+#5 [uv-tool 1/1] FROM ghcr.io/astral-sh/uv:0.11.25@sha256:1e3808aa9023d0980e7c15b1fa7c1ac16ff35925780cf5c459858b2d693f01a9
+#5 resolve ghcr.io/astral-sh/uv:0.11.25@sha256:1e3808aa9023d0980e7c15b1fa7c1ac16ff35925780cf5c459858b2d693f01a9 0.0s done
+#5 DONE 0.0s
+
+#6 [api 1/8] FROM docker.io/library/python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+#6 resolve docker.io/library/python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e 0.0s done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 1.65MB 0.0s done
+#7 DONE 0.0s
+
+#8 [api 2/8] COPY --from=uv-tool /uv /usr/local/bin/uv
+#8 CACHED
+
+#9 [api 3/8] RUN apt-get update     && apt-get install -y --no-install-recommends ca-certificates libgomp1     && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [api 4/8] WORKDIR /app
+#10 CACHED
+
+#11 [api 5/8] COPY pyproject.toml uv.lock ./
+#11 CACHED
+
+#12 [api 6/8] RUN --mount=type=cache,target=/root/.cache/uv     uv sync --locked --no-default-groups --no-install-project
+#12 0.095 Using CPython 3.12.14 interpreter at: /usr/local/bin/python3
+#12 0.095 Creating virtual environment at: .venv
+#12 0.110 Resolved 259 packages in 1ms
+#12 0.755 Downloading sympy (6.0MiB)
+#12 0.756 Downloading pdfminer-six (6.3MiB)
+#12 0.756 Downloading networkx (2.0MiB)
+#12 0.990 Downloading pillow (6.0MiB)
+#12 0.990 Downloading pandas (11.2MiB)
+#12 0.991 Downloading sentencepiece (1.3MiB)
+#12 0.992 Downloading pypdfium2 (3.5MiB)
+#12 0.993 Downloading scikit-learn (8.4MiB)
+#12 0.994 Downloading lxml (4.8MiB)
+#12 0.994 Downloading grpcio (6.4MiB)
+#12 0.994 Downloading aiohttp (1.7MiB)
+#12 0.996 Downloading numpy (13.4MiB)
+#12 0.996 Downloading scipy (32.4MiB)
+#12 0.996 Downloading lz4 (1.2MiB)
+#12 0.997 Downloading pymupdf (23.9MiB)
+#12 0.997 Downloading faiss-cpu (9.2MiB)
+#12 0.997 Downloading zstandard (4.8MiB)
+#12 0.998 Downloading torch (97.2MiB)
+#12 0.998 Downloading pyarrow (44.7MiB)
+#12 0.998 Downloading hf-xet (4.0MiB)
+#12 0.998 Downloading uvloop (4.1MiB)
+#12 0.999 Downloading tiktoken (1.1MiB)
+#12 0.999 Downloading transformers (11.4MiB)
+#12 0.999 Downloading tokenizers (3.1MiB)
+#12 0.999 Downloading setuptools (1.2MiB)
+#12 0.999 Downloading cryptography (4.5MiB)
+#12 1.000 Downloading openai (1.3MiB)
+#12 1.000 Downloading pydantic-core (1.9MiB)
+#12 6.334  Downloaded tiktoken
+#12 6.524  Downloaded lz4
+#12 6.540  Downloaded setuptools
+#12 6.609  Downloaded sentencepiece
+#12 6.849  Downloaded openai
+#12 7.054  Downloaded aiohttp
+#12 7.179  Downloaded pydantic-core
+#12 7.366  Downloaded networkx
+#12 8.439  Downloaded tokenizers
+#12 8.613  Downloaded pypdfium2
+#12 9.087  Downloaded hf-xet
+#12 9.230  Downloaded uvloop
+#12 9.461  Downloaded cryptography
+#12 9.734  Downloaded zstandard
+#12 9.738  Downloaded lxml
+#12 11.13  Downloaded pillow
+#12 11.24  Downloaded sympy
+#12 11.28  Downloaded grpcio
+#12 11.36  Downloaded pdfminer-six
+#12 12.70  Downloaded scikit-learn
+#12 13.57  Downloaded faiss-cpu
+#12 15.37  Downloaded pandas
+#12 15.57  Downloaded transformers
+#12 16.49  Downloaded numpy
+#12 19.23  Downloaded pymupdf
+#12 20.49  Downloaded scipy
+#12 21.73  Downloaded pyarrow
+#12 26.97  Downloaded torch
+#12 26.97 Prepared 107 packages in 26.85s
+#12 30.19 Installed 107 packages in 3.22s
+#12 30.19  + accelerate==1.14.0
+#12 30.19  + aiohappyeyeballs==2.7.1
+#12 30.19  + aiohttp==3.14.2
+#12 30.19  + aiosignal==1.4.0
+#12 30.19  + annotated-doc==0.0.4
+#12 30.19  + annotated-types==0.7.0
+#12 30.19  + anyio==4.14.1
+#12 30.19  + attrs==26.1.0
+#12 30.19  + cachetools==7.1.4
+#12 30.19  + certifi==2026.6.17
+#12 30.19  + cffi==2.1.0
+#12 30.19  + charset-normalizer==3.4.9
+#12 30.19  + click==8.4.2
+#12 30.19  + cryptography==49.0.0
+#12 30.19  + datasets==5.0.0
+#12 30.19  + dill==0.4.1
+#12 30.19  + distro==1.9.0
+#12 30.19  + faiss-cpu==1.14.3
+#12 30.19  + fastapi==0.139.0
+#12 30.19  + filelock==3.31.2
+#12 30.19  + flagembedding==1.4.0
+#12 30.19  + frozenlist==1.8.0
+#12 30.19  + fsspec==2026.4.0
+#12 30.19  + grpcio==1.82.1
+#12 30.19  + h11==0.16.0
+#12 30.19  + hf-xet==1.5.2
+#12 30.19  + httpcore==1.0.9
+#12 30.19  + httptools==0.8.0
+#12 30.19  + httpx==0.28.1
+#12 30.19  + huggingface-hub==0.36.2
+#12 30.19  + idna==3.18
+#12 30.19  + ir-datasets==0.6.3
+#12 30.19  + jinja2==3.1.6
+#12 30.19  + jiter==0.16.0
+#12 30.19  + joblib==1.5.3
+#12 30.19  + jsonpatch==1.33
+#12 30.19  + jsonpointer==3.1.1
+#12 30.19  + langchain-core==1.5.0
+#12 30.19  + langchain-protocol==0.0.18
+#12 30.19  + langchain-text-splitters==1.1.2
+#12 30.19  + langsmith==0.10.9
+#12 30.19  + lxml==6.1.1
+#12 30.19  + lz4==4.4.5
+#12 30.19  + markupsafe==3.0.3
+#12 30.19  + milvus-lite==3.1.0
+#12 30.19  + mpmath==1.3.0
+#12 30.19  + multidict==6.7.1
+#12 30.19  + multiprocess==0.70.19
+#12 30.19  + narwhals==2.24.0
+#12 30.19  + networkx==3.6.1
+#12 30.19  + numpy==2.2.6
+#12 30.19  + openai==2.44.0
+#12 30.19  + orjson==3.11.9
+#12 30.19  + packaging==26.2
+#12 30.19  + pandas==2.3.3
+#12 30.19  + pdfminer-six==20260107
+#12 30.19  + pdfplumber==0.11.10
+#12 30.19  + peft==0.14.0
+#12 30.19  + pillow==12.3.0
+#12 30.19  + propcache==0.5.2
+#12 30.19  + protobuf==7.35.1
+#12 30.19  + psutil==7.2.2
+#12 30.19  + pyarrow==25.0.0
+#12 30.19  + pycparser==3.0
+#12 30.19  + pydantic==2.13.4
+#12 30.19  + pydantic-core==2.46.4
+#12 30.19  + pydantic-settings==2.14.2
+#12 30.19  + pymilvus==3.0.0
+#12 30.19  + pymupdf==1.28.0
+#12 30.19  + pypdfium2==5.10.1
+#12 30.19  + python-dateutil==2.9.0.post0
+#12 30.19  + python-dotenv==1.2.2
+#12 30.19  + python-multipart==0.0.32
+#12 30.19  + pytz==2026.2
+#12 30.19  + pyyaml==6.0.3
+#12 30.19  + regex==2026.7.19
+#12 30.19  + requests==2.34.2
+#12 30.19  + requests-toolbelt==1.0.0
+#12 30.19  + safetensors==0.8.0
+#12 30.19  + scikit-learn==1.9.0
+#12 30.19  + scipy==1.18.0
+#12 30.19  + sentence-transformers==5.6.0
+#12 30.19  + sentencepiece==0.2.2
+#12 30.19  + setuptools==79.0.1
+#12 30.19  + six==1.17.0
+#12 30.19  + sniffio==1.3.1
+#12 30.19  + starlette==0.52.1
+#12 30.19  + sympy==1.14.0
+#12 30.19  + tenacity==9.1.4
+#12 30.19  + threadpoolctl==3.6.0
+#12 30.19  + tiktoken==0.13.0
+#12 30.19  + tokenizers==0.22.2
+#12 30.19  + torch==2.8.0
+#12 30.19  + tqdm==4.68.4
+#12 30.19  + transformers==4.57.6
+#12 30.19  + typing-extensions==4.16.0
+#12 30.19  + typing-inspection==0.4.2
+#12 30.19  + tzdata==2026.3
+#12 30.19  + urllib3==2.7.0
+#12 30.19  + uuid-utils==0.17.0
+#12 30.19  + uvicorn==0.51.0
+#12 30.19  + uvloop==0.22.1
+#12 30.19  + watchfiles==1.2.0
+#12 30.19  + websockets==16.0
+#12 30.19  + xxhash==3.8.1
+#12 30.19  + yarl==1.24.5
+#12 30.19  + zstandard==0.25.0
+#12 DONE 30.9s
+
+#13 [api 7/8] RUN groupadd --gid 10001 findoc     && useradd --uid 10001 --gid findoc --create-home findoc     && mkdir -p /var/lib/findoc /var/cache/findoc     && chown findoc:findoc /var/lib/findoc /var/cache/findoc
+#13 DONE 0.3s
+
+#14 [api 8/8] COPY app/ ./app/
+#14 DONE 0.1s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 26.3s done
+#15 exporting manifest sha256:ab41a5f9b5d0df7940ae658b8a0574f1451c8d2e585106829bd11fec8be4812b 0.0s done
+#15 exporting config sha256:9e9a21933e240efece958f3ae39fa648f176246c16de84d0e494118bbcedfe3b done
+#15 exporting attestation manifest sha256:fc33a978760dbaf55827f53d493ff68fd67784acd992015df9906db402565424 done
+#15 exporting manifest list sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640 done
+#15 naming to docker.io/library/findoc-api:local done
+#15 unpacking to docker.io/library/findoc-api:local
+#15 unpacking to docker.io/library/findoc-api:local 6.8s done
+#15 DONE 33.1s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/21wdvf9bm8u87r54xulmopthy

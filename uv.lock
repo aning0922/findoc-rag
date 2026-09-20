@@ -1231,7 +1231,6 @@ dependencies = [
     { name = "httpx" },
     { name = "langchain-core" },
     { name = "langchain-text-splitters" },
-    { name = "mineru", extra = ["all"] },
     { name = "openai" },
     { name = "pdfplumber" },
     { name = "pydantic" },
@@ -1243,6 +1242,11 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+mineru = [
+    { name = "mineru", extra = ["all"] },
 ]
 
 [package.dev-dependencies]
@@ -1268,7 +1272,7 @@ requires-dist = [
     { name = "httpx" },
     { name = "langchain-core", specifier = "==1.5.0" },
     { name = "langchain-text-splitters", specifier = ">=1.1.2" },
-    { name = "mineru", extras = ["all"], specifier = ">=3.4.4" },
+    { name = "mineru", extras = ["all"], marker = "extra == 'mineru'", specifier = ">=3.4.4" },
     { name = "openai" },
     { name = "pdfplumber", specifier = ">=0.11.10" },
     { name = "pydantic" },
@@ -1281,6 +1285,7 @@ requires-dist = [
     { name = "tiktoken", specifier = ">=0.13.0" },
     { name = "uvicorn", extras = ["standard"] },
 ]
+provides-extras = ["mineru"]
 
 [package.metadata.requires-dev]
 dev = [

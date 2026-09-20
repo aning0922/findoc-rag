@@ -1,0 +1,2 @@
+# Preserve raw build output, including whitespace after timestamp prefixes.
+artifacts/container-build/*.log -whitespace
