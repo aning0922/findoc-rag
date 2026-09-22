@@ -1,0 +1,141 @@
+{
+  "observed_at_utc": "2026-09-22T04:50:14.275143+00:00",
+  "source_base_commit": "789eddf09d68cde6f8798adf9e46dc9d72a848df",
+  "source_uncommitted": true,
+  "platform": "linux/arm64",
+  "images": [
+    {
+      "id": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+      "tags": [
+        "findoc-api:local"
+      ],
+      "platform": "linux/arm64",
+      "user": "10001:10001"
+    },
+    {
+      "id": "sha256:76f4e3b822048047a09b80f1b3851f336990f3b5a7043baf09be038af6344fc9",
+      "tags": [
+        "findoc-web:local"
+      ],
+      "platform": "linux/arm64",
+      "user": "101"
+    }
+  ],
+  "containers": [
+    {
+      "project": "findoc-d1",
+      "service": "api",
+      "id": "d114218aa450f19b2f01cb50e6517a2a1b5e60c82986f831ef96a49e3d14e5c6",
+      "state": "running",
+      "health": "healthy",
+      "volumes": [
+        {
+          "name": "findoc-d1_runtime-data",
+          "destination": "/var/lib/findoc"
+        },
+        {
+          "name": "findoc-d1_model-cache",
+          "destination": "/var/cache/findoc"
+        }
+      ]
+    },
+    {
+      "project": "findoc-d1",
+      "service": "web",
+      "id": "3085cc7bca747909bc93d646fe9231745fd838628e2b2b3f0563ca45eeafd2cd",
+      "state": "running",
+      "health": null,
+      "volumes": []
+    },
+    {
+      "project": "findoc-d1-controlled",
+      "service": "api",
+      "id": "f99e683137e90c3d1caa230cc26dfd51ce7ada08549c02ad37b2a3bb4c4aded0",
+      "state": "running",
+      "health": "healthy",
+      "volumes": [
+        {
+          "name": "findoc-d1-controlled_controlled-runtime-data",
+          "destination": "/var/lib/findoc"
+        }
+      ]
+    },
+    {
+      "project": "findoc-d1-controlled",
+      "service": "web",
+      "id": "0278d2875e8bca872a690bd210d3fbfd317d82aadc6e9bcc07514d7c3141997f",
+      "state": "running",
+      "health": null,
+      "volumes": []
+    }
+  ],
+  "checks": {
+    "compose_static_validation": "passed for both files",
+    "real_bge_milvus_startup": "passed",
+    "real_synthetic_document_ready": "passed",
+    "real_document_readback_after_container_recreation": "passed; full HTTP record and original PDF hash identical",
+    "controlled_browser_run_readback_after_container_recreation": "passed; 1 creation POST, equal result and events",
+    "missing_llm_config_in_network_disabled_container": "expected KeyError for LLM_API_KEY; runtime directory remained absent",
+    "cache_seed_rerun": "verified existing files without overwriting",
+    "ruff_cache_helper": "passed",
+    "node_syntax_and_oxlint_browser_script": "passed",
+    "git_diff_check": "passed"
+  },
+  "inputs_sha256": {
+    "compose.yaml": "a19a61396eefdca3fdf39bca203b3ecf5c363b57151bbe8889fd93eda3e17cf9",
+    "compose.controlled.yaml": "378b628267ad1ec78323e0aa9b8697f15ba0f3f03b1439771a8243a472ee72fe",
+    "Dockerfile": "4498b2b4c4a19e66bcc720c24070d48c699763750abb533c60f7c69c3a72d2b2",
+    "deploy/nginx.conf": "4aa85af09495e275730f308931fbd93c7a46fe495deefe3ae848f66d6188cf48",
+    "app/api/runtime_factory.py": "b77e42bad8c8ce2b7683d03fc4e92dd849ff4b4ed295b4716f55d86e4caca39d",
+    "tests/support/controlled_agent_app.py": "c2af6a39667eb7beb9177faee32f6685e4cd3ef3c2deff5a11dc2fa606d29d5d",
+    "scripts/seed_container_model_cache.py": "1f8402409b721878aa1cb52af1fb211a89c3b06b77c80bfd664e76f3c7f4d6f7",
+    "frontend/scripts/verify-container-persistence.mjs": "ecb442e4798a94bc372e92b9d4ee4af112afe953a8805daa4a31c157731bb665",
+    "doc/container_delivery.md": "809293637bcc4d84edb3291e9f84a8702928ac06e6fea918e71a6bc253348a47"
+  },
+  "secrets": {
+    "full_env_or_config_recorded": false,
+    "usable_provider_credentials_used": false,
+    "paid_llm_called": false
+  },
+  "not_verified": [
+    "Paid LLM and real Agent answers",
+    "SSE through Nginx",
+    "Incomplete task recovery",
+    "Other architectures/platforms",
+    "Cold BGE download in a fresh network environment",
+    "Peak memory and concurrency capacity",
+    "Replacing only API without restarting Nginx"
+  ],
+  "operational_state": "Both exact Compose projects remain running for local inspection; named volumes retained.",
+  "cleanup_after_validation": {
+    "observed_at_utc": "2026-09-22T08:34:41.864770+00:00",
+    "action": "compose stop for the two exact projects; no container, image or volume deletion",
+    "containers": [
+      {
+        "name": "findoc-d1-api-1",
+        "state": "exited",
+        "exit_code": 0
+      },
+      {
+        "name": "findoc-d1-web-1",
+        "state": "exited",
+        "exit_code": 0
+      },
+      {
+        "name": "findoc-d1-controlled-api-1",
+        "state": "exited",
+        "exit_code": 0
+      },
+      {
+        "name": "findoc-d1-controlled-web-1",
+        "state": "exited",
+        "exit_code": 0
+      }
+    ],
+    "retained_volumes": [
+      "findoc-d1_runtime-data",
+      "findoc-d1_model-cache",
+      "findoc-d1-controlled_controlled-runtime-data"
+    ]
+  }
+}

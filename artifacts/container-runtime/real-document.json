@@ -1,0 +1,105 @@
+{
+  "observed_at_utc": "2026-09-22T04:41:23.548039+00:00",
+  "path": "real-container-dependencies",
+  "pdf_sha256": "959cfb296e7c062a340c755ab9470703fcab37cde421652450bbd591dead87ac",
+  "health": {
+    "status": "ok"
+  },
+  "upload_status": 202,
+  "upload_response": {
+    "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+    "source_file": "synthetic_finance_demo.pdf",
+    "status": "queued",
+    "failed_stage": null,
+    "error_code": null,
+    "safe_error_message": null,
+    "created_at": "2026-09-22T04:40:37.190324Z",
+    "updated_at": "2026-09-22T04:40:37.190324Z",
+    "duplicate": false
+  },
+  "observed_states": [
+    "parsing",
+    "ready"
+  ],
+  "document_before_recreate": {
+    "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+    "source_file": "synthetic_finance_demo.pdf",
+    "status": "ready",
+    "failed_stage": null,
+    "error_code": null,
+    "safe_error_message": null,
+    "created_at": "2026-09-22T04:40:37.190324Z",
+    "updated_at": "2026-09-22T04:41:23.384801Z"
+  },
+  "paid_llm_called": false,
+  "containers_before_recreate": {
+    "api": {
+      "id": "adee2be5a9b2db8721d6a52216ad83f6576794a8d4b3120b5a091f50ccbeb044",
+      "image": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+      "volumes": [
+        {
+          "name": "findoc-d1_model-cache",
+          "destination": "/var/cache/findoc"
+        },
+        {
+          "name": "findoc-d1_runtime-data",
+          "destination": "/var/lib/findoc"
+        }
+      ]
+    },
+    "web": {
+      "id": "ac4d2d934dc61ae816b35fab4c9b5a0804e1cf9c85afaa94df2fb2027f79b811",
+      "image": "sha256:76f4e3b822048047a09b80f1b3851f336990f3b5a7043baf09be038af6344fc9",
+      "volumes": []
+    }
+  },
+  "containers_after_recreate": {
+    "api": {
+      "id": "d114218aa450f19b2f01cb50e6517a2a1b5e60c82986f831ef96a49e3d14e5c6",
+      "image": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+      "volumes": [
+        {
+          "name": "findoc-d1_runtime-data",
+          "destination": "/var/lib/findoc"
+        },
+        {
+          "name": "findoc-d1_model-cache",
+          "destination": "/var/cache/findoc"
+        }
+      ]
+    },
+    "web": {
+      "id": "3085cc7bca747909bc93d646fe9231745fd838628e2b2b3f0563ca45eeafd2cd",
+      "image": "sha256:76f4e3b822048047a09b80f1b3851f336990f3b5a7043baf09be038af6344fc9",
+      "volumes": []
+    }
+  },
+  "document_after_recreate": {
+    "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+    "source_file": "synthetic_finance_demo.pdf",
+    "status": "ready",
+    "failed_stage": null,
+    "error_code": null,
+    "safe_error_message": null,
+    "created_at": "2026-09-22T04:40:37.190324Z",
+    "updated_at": "2026-09-22T04:41:23.384801Z"
+  },
+  "persistent_files": {
+    "objects": [
+      {
+        "relative_path": "objects/documents/06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10.pdf",
+        "bytes": 3681,
+        "sha256": "959cfb296e7c062a340c755ab9470703fcab37cde421652450bbd591dead87ac"
+      }
+    ],
+    "databases": {
+      "documents.db": 16384,
+      "agent-runs.db": 28672,
+      "milvus.db": 4096
+    },
+    "uid": 10001,
+    "runtime_writable": true,
+    "tokenizer_cache_path": "/var/cache/findoc/tiktoken"
+  },
+  "recreate_readback_passed": true
+}

@@ -1,0 +1,92 @@
+{
+  "observed_at_utc": "2026-09-22T04:43:40.482Z",
+  "before": {
+    "api": {
+      "id": "4ca0173c2a9bcc6cdb719af2a59273cac3fca484c5ef35db3d0c877d375e670e",
+      "image": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+      "volumes": [
+        {
+          "name": "findoc-d1-controlled_controlled-runtime-data",
+          "destination": "/var/lib/findoc"
+        }
+      ]
+    },
+    "web": {
+      "id": "66ba2d9525e892801178e51cd5821887cdea1d4e72b0824c26affd4839fbdeb2",
+      "image": "sha256:76f4e3b822048047a09b80f1b3851f336990f3b5a7043baf09be038af6344fc9",
+      "volumes": []
+    }
+  },
+  "after": {
+    "api": {
+      "id": "f99e683137e90c3d1caa230cc26dfd51ce7ada08549c02ad37b2a3bb4c4aded0",
+      "image": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+      "volumes": [
+        {
+          "name": "findoc-d1-controlled_controlled-runtime-data",
+          "destination": "/var/lib/findoc"
+        }
+      ]
+    },
+    "web": {
+      "id": "0278d2875e8bca872a690bd210d3fbfd317d82aadc6e9bcc07514d7c3141997f",
+      "image": "sha256:76f4e3b822048047a09b80f1b3851f336990f3b5a7043baf09be038af6344fc9",
+      "volumes": []
+    }
+  },
+  "browser_post_count": 1,
+  "created": {
+    "run_id": "90171dba-06d7-4136-98c8-6955c2ca4049",
+    "document_id": "controlled-synthetic-document",
+    "user_result": {
+      "status": "answered",
+      "content": "2025年度营业收入为120万元。[1]",
+      "citations": [
+        {
+          "number": 1,
+          "source_file": "controlled-synthetic-finance.pdf",
+          "page": 1,
+          "chunk_id": "controlled-page-1-revenue"
+        }
+      ]
+    }
+  },
+  "restored": {
+    "run_id": "90171dba-06d7-4136-98c8-6955c2ca4049",
+    "document_id": "controlled-synthetic-document",
+    "user_result": {
+      "status": "answered",
+      "content": "2025年度营业收入为120万元。[1]",
+      "citations": [
+        {
+          "number": 1,
+          "source_file": "controlled-synthetic-finance.pdf",
+          "page": 1,
+          "chunk_id": "controlled-page-1-revenue"
+        }
+      ]
+    }
+  },
+  "events": {
+    "run_id": "90171dba-06d7-4136-98c8-6955c2ca4049",
+    "projection": "history",
+    "events": [
+      {
+        "sequence": 1,
+        "execution_event_type": "tool_requested",
+        "summary": "记录到一次工具调用申请。"
+      },
+      {
+        "sequence": 2,
+        "execution_event_type": "tool_succeeded",
+        "summary": "一次工具调用完成；不代表用户答案已通过验证。"
+      },
+      {
+        "sequence": 3,
+        "execution_event_type": "run_succeeded",
+        "summary": "执行循环正常结束；用户结果以结果接口为准。"
+      }
+    ]
+  },
+  "boundary": "Real browser/Nginx/HTTP/business/SQLite; fake embedding/store/provider; seeded document is not ingestion evidence."
+}
