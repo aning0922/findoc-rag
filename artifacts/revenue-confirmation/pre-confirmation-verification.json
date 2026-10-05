@@ -1,0 +1,39 @@
+{
+  "phase": "real-review-displayed-operator-input-pending",
+  "image": "findoc-api:local",
+  "network": "none",
+  "cache": "findoc-d1_model-cache; readonly",
+  "old_runtime_volumes_mounted": false,
+  "old_services_started": false,
+  "paid_llm_called": false,
+  "pytest_passed": 70,
+  "existing_swig_warnings": 5,
+  "ruff": "passed",
+  "mypy_source_files": 4,
+  "mypy": "passed",
+  "actual_candidate_report": "actual-candidates.json",
+  "actual_snapshot_id": "0b5836c73f2063e44636dd5deab76b257f1143724096f37f722b72aea48e7157",
+  "confirmation_rows": {
+    "revenue_confirmations": 0,
+    "confirmed_revenue_facts": 0
+  },
+  "noninteractive_confirmation": {
+    "exit_code": 1,
+    "code": "interactive_confirmation_required",
+    "result": null
+  },
+  "actual_confirmation_completed": false,
+  "actual_reopen_calculation_completed": false,
+  "execution_notes": [
+    "First CLI launch reported a source parsing error; subsequent host/container source hashes matched and both parsed. Cause not established.",
+    "CLI originally required a Milvus file; actual version uses a directory. Guard corrected and regression test added."
+  ],
+  "source_sha256": {
+    "app/agent/revenue_confirmation.py": "44c0fb2434bc6af5cfce4deb88534805a8334e645af255865171e1ecd6f2f51a",
+    "app/agent/sqlite_financial_facts.py": "32f4c7d718e03d73fa7f3db7e1ef9c606134ef899fb005706c7fc51dab7f0b0c",
+    "app/agent/research_workflow.py": "7a28174eb417529dd10a881270f7d1ddd60632fc80aa95a767f7cfc949848afb",
+    "app/agent/finance_tools.py": "eda996b6dede04f3d81852efd8645fb0930ef806b09e3f0e1871828440ff2905",
+    "app/agent/revenue_extraction.py": "28dc7fbe67f28ab9eda11e09f3df5297a2d2e0aaa51d0bc49d3bae00c6da8ad6",
+    "scripts/revenue_review.py": "e250650acd095a77c4f60bf54671c3cb8bac3fd4b9cdf87756b069c0d0dd7f43"
+  }
+}

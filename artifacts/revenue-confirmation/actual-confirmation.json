@@ -1,0 +1,72 @@
+{
+  "status": "confirmed",
+  "confirmation_id": "bb8bc523-1069-453d-a006-68d0e7861d28",
+  "confirmed_at": "2026-10-05T07:53:05.051632+00:00",
+  "confirmation_kind": "local_operator",
+  "snapshot_id": "0b5836c73f2063e44636dd5deab76b257f1143724096f37f722b72aea48e7157",
+  "review": {
+    "schema": "revenue-review-v1",
+    "revision": {
+      "workspace_id": "demo",
+      "document_id": "b7d280a9785cfbc2917fda87e4db5281e8462cc4247e22c518bf37cc50ac0e99",
+      "content_sha256": "a8c07e816fa32e8d0dc805c17405805da6e5622fa0f663fbdbf48afe77cca399",
+      "attempt": 1,
+      "extraction_method": "revenue_line_rule",
+      "extraction_version": "v1"
+    },
+    "candidates": [
+      {
+        "workspace_id": "demo",
+        "document_id": "b7d280a9785cfbc2917fda87e4db5281e8462cc4247e22c518bf37cc50ac0e99",
+        "source_ref": "revenue:be04cca7e298dd3548f8e441dda1f77d0866f38face7ebd1f82d2cdf1aa5cb7d",
+        "chunk_id": "57a5a465a5fd9e7b9a281c53c7b99825639702755d6f8b3312e3adb49f8e9284",
+        "source_file": "synthetic.pdf",
+        "page": 1,
+        "period": 2024,
+        "value": "1000000",
+        "unit": "CNY_YUAN",
+        "extraction_method": "revenue_line_rule",
+        "extraction_version": "v1",
+        "evidence": [
+          {
+            "chunk_id": "57a5a465a5fd9e7b9a281c53c7b99825639702755d6f8b3312e3adb49f8e9284",
+            "source_file": "synthetic.pdf",
+            "page": 1,
+            "text": "合成资料：虚构企业甲\n完全虚构，仅用于软件演示；不对应真实公司。\n经营摘要：年度营业收入\n2025年度营业收入：120万元。\n2024年度营业收入：100万元。\n金额单位：万元。期间口径：对应完整年度。\n第1页，共2页",
+            "start": 63,
+            "end": 80,
+            "raw_value": "100",
+            "raw_unit": "万元"
+          }
+        ]
+      },
+      {
+        "workspace_id": "demo",
+        "document_id": "b7d280a9785cfbc2917fda87e4db5281e8462cc4247e22c518bf37cc50ac0e99",
+        "source_ref": "revenue:776e6f3eb1c0c4eed3454657c3cbbde23d6746451bb0b96d462e13c18c663b9a",
+        "chunk_id": "57a5a465a5fd9e7b9a281c53c7b99825639702755d6f8b3312e3adb49f8e9284",
+        "source_file": "synthetic.pdf",
+        "page": 1,
+        "period": 2025,
+        "value": "1200000",
+        "unit": "CNY_YUAN",
+        "extraction_method": "revenue_line_rule",
+        "extraction_version": "v1",
+        "evidence": [
+          {
+            "chunk_id": "57a5a465a5fd9e7b9a281c53c7b99825639702755d6f8b3312e3adb49f8e9284",
+            "source_file": "synthetic.pdf",
+            "page": 1,
+            "text": "合成资料：虚构企业甲\n完全虚构，仅用于软件演示；不对应真实公司。\n经营摘要：年度营业收入\n2025年度营业收入：120万元。\n2024年度营业收入：100万元。\n金额单位：万元。期间口径：对应完整年度。\n第1页，共2页",
+            "start": 45,
+            "end": 62,
+            "raw_value": "120",
+            "raw_unit": "万元"
+          }
+        ]
+      }
+    ]
+  },
+  "result": null,
+  "paid_llm_called": false
+}

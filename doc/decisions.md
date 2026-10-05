@@ -266,3 +266,69 @@
 - 使用显式合成 PDF，文件及原始评测保留；复用现有 Linux ARM64 镜像和只读模型缓存，以离线、无网络容器执行，未挂载原业务数据卷。实际第 1 页命中同时支持 2024 的“100万元”和 2025 的“120万元”，规范值分别为 1000000/1200000 元，引用不同，来源身份/原文位置完整；确认事实为空、计算结果为 null。
 - 定向与受影响回归共 123 passed（5 条既有 SWIG 弃用警告）；Ruff 和 3 个源码文件 mypy 通过。`tests/test_revenue_extraction.py` 明确标注手写 SearchHit、fake embedding/store，覆盖重复/多来源合并/冲突、未知单位、来源缺失/越界/变更、期间不足、格式限制及精确换算；它们不能替代上述真实工程证据。
 - 候选确认持久化、来源版本失效和计算 runtime 接入仍未实现；现有 Agent runtime 仍只开放检索。
+
+## 本地收入确认与持久事实计算合同（2026-10-05）
+
+- `RevenueConfirmationService` 是独立本地应用入口。`preview` 只展示；`confirm`
+  要求明确接受和操作者所见的完整快照摘要，再重新查证并收集候选，完全一致才保存。
+  不能由等待确认状态、库中已有数字或仅相同 `source_ref` 推断接受。
+- `RevenueSourceReader` 从服务端文档服务取得 workspace/document、`ready`、
+  `content_sha256` 和 `attempt`，重新读取原 PDF 核对摘要，收集前后再次核对文档。
+  当前候选来自当前抽取代码和真实 Retriever；完整快照包含两期金额、规范单位、
+  全部原文证据及抽取方法/版本，不含检索分数。调用方只提交所见摘要，不提交版本真值。
+- PDF 内容不同的正常上传产生不同 document_id；没有新增同 ID 替换 PDF 入口。
+  实际文件缺失/内容与记录不符会阻断；`attempt` 只覆盖现有失败后重试。
+  抽取规则修改必须同步维护 `EXTRACTION_VERSION`，重新收集还能发现当前候选内容变化。
+  不证明全索引完整性，不提供 ready 文档通用重处理或并发外部文件修改的跨存储锁。
+- `SQLiteRevenueConfirmationRepository` 与 documents 共用同一 SQLite 文件，增加
+  `revenue_confirmations` 与 `confirmed_revenue_facts` 两表。`BEGIN IMMEDIATE`
+  内重新核对当前文档，确认头和两期事实全部提交或回滚。相同仍有效的快照重复确认
+  返回原确认 ID/时间；损坏的半组记录不会由重复确认静默修复。
+- 确认保存单用户动作类型 `local_operator`；机械测试使用 `simulated_test` 并明确标注。
+  两者不能通过重复确认相互冒充。没有认证、审批权限或通用审计系统。
+- 金额以规范十进制 TEXT 保存，用 `Decimal` 读回；不经过 float。读回完整两期、
+  结构验证和内容摘要验证均通过后，还必须与本次新查证的快照一致。
+  历史确认保留，其可用性针对当前来源动态核对；不持久保存或复用计算结果。
+- 一次计算专用的 SQLite 查询适配器实现现有 `FinancialFactRepository`，同时限制
+  workspace/document/指标/source_ref。`calculate_confirmed_revenue_growth` 支持注入
+  此查询，仍复用 `CalculateFinancialMetricTool` 的唯一公式和 `ROUND_HALF_UP` 两位舍入。
+  原纯 Python 变体继续使用默认内存仓储；不能绕过本地服务来证明持久确认准入。
+- 计算前重新查证、读库；返回结果前再次核对当前候选。缺确认、范围不符、期间/单位
+  不合法、零分母、来源变化和记录损坏都不返回可用结果，不回退到历史成功值。
+  成功结果包含确认 ID/时间/动作类型、版本、两条输入事实与全部原文证据。
+
+本地入口（使用显式隔离的 ready 数据根，不读取默认 runtime 或 LLM 配置）：
+
+```sh
+PYTHONPATH=. python scripts/revenue_review.py preview \
+  --runtime-root /absolute/isolated-runtime --document-id DOCUMENT_ID
+PYTHONPATH=. python scripts/revenue_review.py confirm \
+  --runtime-root /absolute/isolated-runtime --document-id DOCUMENT_ID
+# 终端展示全部候选后，操作者输入 CONFIRM <本次所见的完整摘要>。
+# 没有 --yes；重开进程计算只读取已保存确认，不创建新的确认。
+PYTHONPATH=. python scripts/revenue_review.py calculate \
+  --runtime-root /absolute/isolated-runtime --document-id DOCUMENT_ID \
+  --confirmation-id CONFIRMATION_ID --output new-calculation-report.json
+```
+
+`tests/test_revenue_confirmation.py` 使用真实 SQLite/文档服务/抽取/计算，检索与
+PDF bytes 为替身，确认是显式模拟。真实上传、实际检索、操作者确认和重开计算
+须另外执行并保留当次报告，测试通过不能代替该人工链。现有 Agent runtime 仍仅检索。
+
+当前验证证据：
+
+- [真实候选](../artifacts/revenue-confirmation/actual-candidates.json)：新隔离数据根中
+  实际 ASGI 上传合成 PDF，经 parser/BGE/Milvus/真实 Retriever 获取两期候选。
+- [明确确认](../artifacts/revenue-confirmation/actual-confirmation.json)：操作者核对完整
+  快照后明确输入绑定其摘要的 `CONFIRM` 指令，CLI 再查证，保存动作类型为
+  `local_operator`；此步骤只保存确认，`result` 仍为 null。
+- [重开计算](../artifacts/revenue-confirmation/actual-calculation.json)：确认进程退出，
+  新 CLI 进程从 SQLite 读回同一确认 ID 和两条十进制 TEXT 金额，重新查证来源后
+  复用原计算器得到 `20.00 / PERCENT / revenue_growth_rate_v1`，输入/证据完整。
+- [实际存储受控故障](../artifacts/revenue-confirmation/actual-source-changed-rejection.json)：
+  仅在成功数据根的新副本中追加 PDF 字节，保留原数据库的内容摘要与确认记录；
+  CLI 返回 `source_changed`、result=null、退出1。该故障注入证明实际文件会重新核对，
+  不表示产品新增同 ID 替换上传功能；原成功来源、确认与报告均保留。
+- [验证汇总](../artifacts/revenue-confirmation/verification.json)：定向70 passed，
+  Ruff/4源码mypy/diff检查通过。其余拒绝、损坏与事务故障使用明确标注的替身输入和
+  模拟动作。旧业务卷未挂载，模型缓存只读，无网络、无 LLM，新临时容器执行后移除。

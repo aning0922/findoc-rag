@@ -12,6 +12,7 @@ from app.agent.finance_tools import CalculateFinancialMetricTool, FinancialMetri
 from app.agent.financial_facts import (
     FinancialFact,
     FinancialFactKey,
+    FinancialFactRepository,
     FinancialUnit,
     InMemoryFinancialFactRepository,
 )
@@ -290,7 +291,11 @@ def confirm_revenue_candidates(state: RevenueWorkflowState) -> RevenueWorkflowSt
     )
 
 
-def calculate_confirmed_revenue_growth(state: RevenueWorkflowState) -> RevenueWorkflowState:
+def calculate_confirmed_revenue_growth(
+    state: RevenueWorkflowState,
+    *,
+    repository: FinancialFactRepository | None = None,
+) -> RevenueWorkflowState:
     """只读取两条已确认事实，复用现有确定性工具生成带来源结果。
 
     输入必须是 `ready_for_calculation` 状态。成功返回 `completed`；
@@ -302,7 +307,9 @@ def calculate_confirmed_revenue_growth(state: RevenueWorkflowState) -> RevenueWo
 
     ordered = tuple(sorted(state.confirmed_facts, key=lambda item: item.fact.period))
     previous, current = ordered
-    repository = InMemoryFinancialFactRepository([previous.fact, current.fact])
+    # 纯 Python 变体保留内存默认值；持久确认入口注入本次查证后的 SQLite 查询。
+    if repository is None:
+        repository = InMemoryFinancialFactRepository([previous.fact, current.fact])
     calculator = CalculateFinancialMetricTool(repository)
     execution_context = ToolExecutionContext(
         trusted_context=TrustedContext(workspace_id=state.workspace_id),
@@ -320,6 +327,7 @@ def calculate_confirmed_revenue_growth(state: RevenueWorkflowState) -> RevenueWo
             state,
             stage=RevenueWorkflowStage.FAILED,
             failure_code=exc.code.value,
+            result=None,
         )
 
     value = payload.get("value")

@@ -1,0 +1,16 @@
+{
+  "path": "actual-persisted-confirmation-copied-runtime-pdf-checksum-fault-cli",
+  "fault_kind": "controlled fault injection: PDF bytes appended in a fresh runtime copy",
+  "product_same_id_replacement_feature": false,
+  "original_successful_source_preserved": true,
+  "original_confirmation_rows": 1,
+  "original_confirmed_fact_rows": 2,
+  "previous_success_value": "20.00",
+  "confirmation_id": "bb8bc523-1069-453d-a006-68d0e7861d28",
+  "exit_code": 1,
+  "response": {"status": "rejected", "code": "source_changed", "result": null},
+  "paid_llm_called": false,
+  "network": "none",
+  "model_cache_mount": "readonly",
+  "old_runtime_volumes_mounted": false
+}
