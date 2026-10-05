@@ -241,3 +241,28 @@
 - 计算器拒绝期间顺序或零分母时，Workflow 保留现有 `FinancialMetricErrorCode` 值并进入 `failed`。
 
 成功终态保留 `20.00 / PERCENT / revenue_growth_rate_v1` 等程序结果，以及两条已确认事实的 `source_ref/chunk_id/source_file/page`。它只证明状态与准入合同，不证明真实文档抽取、持久确认、模型质量或生产 runtime 已接通。
+
+## 单文档营业收入候选抽取合同（2026-10-04）
+
+### 入口、结构与能力边界
+
+- `RevenueCandidateService.collect(document_id=...)` 复用 `DocumentTaskPreparer` 查证归属及 ready，再以固定两期营业收入问题调用真实 `Retriever`。输出为候选状态、原始命中和排除的非目标期间；不进入确认或计算步骤。这个本地服务尚未装配进 Agent 工具或新增 HTTP/UI 入口。
+- 复用 `RevenueCandidate` 和 `RevenueWorkflowState`；指标固定为营业收入，期间固定为 2024/2025。候选的等待确认/失败由 Workflow 状态表达，候选对象本身始终未确认。`FinancialFact` 只校验可信数值记录结构，不能把创建对象当作操作者确认的证据。
+- 最小新增 `RevenueEvidence` 保存实际命中全文、`chunk_id/source_file/page`、Python 字符位置 `start/end`、原始数字和单位；候选保存全部 evidence 及 `revenue_line_rule/v1` 抽取方法/版本。原有单处来源字段只展示 evidence 的第一处，不能当作合并候选的全部来源。空 evidence 仅兼容既有纯 Python 变体；真实抽取入口始终附证据。既有内存确认变体透传 evidence，不实现持久确认。
+- 实际合成 PDF 的每条收入都是“YYYY年度营业收入：数字单位。”独立段落行，故采用整行有限规则。只支持这种年份/年度/指标写法及普通小数、合法千分位；不支持表格列对齐、科学计数法、跨片段单位推断或通用财报抽取。不支持的格式形成缺失候选，不静默截取数字前缀。
+- 对当前固定完整年度收入例，先做规则抽取可避免手工重复录入。主要备选是操作者对真实命中选原文位置并标注期间/金额/单位；必须仍绑定检索证据，不允许输入脱离证据的裸数值。当前输入无需增加 LLM 抽取依赖。规则不自动判断母公司/合并口径、修订口径或文本真假，操作者仍需核对。
+
+### 来源、单位与重复规则
+
+- 身份必须来自 store 实体经 `MilvusSearchStore(include_scope_metadata=True)` 和 `Retriever` 实际传递；核准记录/过滤条件只用于比对，不用于补造命中身份。整个批次先核对 workspace/document/source_file；缺身份、非法来源字段或同 chunk 内容变化为 `source_invalid`，归属不符为 `scope_mismatch`。任一来源异常整体阻断，不保留部分候选冒充成功。
+- 只从原文数字字符串构造 `Decimal`，去掉已通过规则验证的千分位逗号；明确“元/万元/亿元”分别乘以 1/10000/100000000，规范单位统一为 `CNY_YUAN`。局部 Decimal 精度随有效数字长度扩大，避免换算截断。原始文字/数字/单位不覆盖；单位缺失或不支持则保留原数且 `unit=None`，不从文档其他位置默认填入。
+- 同来源同一处文字重复返回只保留一处证据，忽略 score 差异。已知单位的候选按期间、规范金额、单位合并，保留不同位置的全部证据；未知单位只能去除完全相同的证据，不能按裸数字合并。
+- `source_ref` 由实际范围、固定指标、期间和排序后的 chunk/原文位置生成摘要。同 chunk 两个期间产生不同引用；排序只稳定展示，不依 score 选择真值。引用是候选标识，不能作为已确认标识或来源版本失效机制。
+- 合并后交给既有 `record_revenue_candidates`：目标期间缺失为 `missing_candidate`；同时出现非目标期间且目标不足为 `period_mismatch`，保留 `excluded_periods`，不改写年份。两期齐全后，任一单位未知为 `unit_unknown`；同一期仍有多个已知金额为 `candidate_conflict`。这些失败不能确认或计算；完整唯一候选只到 `awaiting_confirmation`。
+
+### 验证与限制
+
+- `scripts/verify_revenue_candidates.py` 在全新数据目录中，经真实文档 ASGI 上传 API、真实 parser/BGE/Milvus、真实 Retriever，再调用候选服务；报告见 `artifacts/revenue-candidates/actual-candidates.json`。这是进程内 HTTP/业务链证据，不包含浏览器或 TCP 部署验收。
+- 使用显式合成 PDF，文件及原始评测保留；复用现有 Linux ARM64 镜像和只读模型缓存，以离线、无网络容器执行，未挂载原业务数据卷。实际第 1 页命中同时支持 2024 的“100万元”和 2025 的“120万元”，规范值分别为 1000000/1200000 元，引用不同，来源身份/原文位置完整；确认事实为空、计算结果为 null。
+- 定向与受影响回归共 123 passed（5 条既有 SWIG 弃用警告）；Ruff 和 3 个源码文件 mypy 通过。`tests/test_revenue_extraction.py` 明确标注手写 SearchHit、fake embedding/store，覆盖重复/多来源合并/冲突、未知单位、来源缺失/越界/变更、期间不足、格式限制及精确换算；它们不能替代上述真实工程证据。
+- 候选确认持久化、来源版本失效和计算 runtime 接入仍未实现；现有 Agent runtime 仍只开放检索。

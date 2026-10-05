@@ -1,0 +1,21 @@
+{
+  "image": "findoc-api:local",
+  "image_id": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+  "platform": "linux/arm64",
+  "network": "none",
+  "workspace_mount": "readonly; current source overrides image code via PYTHONPATH",
+  "cache_volume": "findoc-d1_model-cache; readonly",
+  "runtime_storage": "two fresh verification directories outside previous runtime roots",
+  "prior_runtime_volumes_mounted": false,
+  "existing_containers_started": false,
+  "extra_container_removed_after_run": true,
+  "initial_report": "initial-candidates.json; before rejecting partial malformed numbers",
+  "final_report": "actual-candidates.json; all recorded source hashes match final code",
+  "pytest": {
+    "passed": 123,
+    "warnings": 5,
+    "warning_kind": "existing SWIG deprecations"
+  },
+  "ruff": "passed",
+  "mypy": "3 source files passed"
+}

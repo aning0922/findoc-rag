@@ -1,0 +1,133 @@
+{
+  "observed_at_utc": "2026-10-04T13:19:35.389927+00:00",
+  "path": "actual-asgi-upload-real-parser-bge-milvus-retriever-candidates",
+  "input_kind": "explicitly-synthetic-pdf",
+  "pdf_sha256": "959cfb296e7c062a340c755ab9470703fcab37cde421652450bbd591dead87ac",
+  "upload_status": 202,
+  "upload": {
+    "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+    "source_file": "synthetic_finance_demo.pdf",
+    "status": "queued",
+    "failed_stage": null,
+    "error_code": null,
+    "safe_error_message": null,
+    "created_at": "2026-10-04T13:19:33.051753Z",
+    "updated_at": "2026-10-04T13:19:33.051753Z",
+    "duplicate": false
+  },
+  "document": {
+    "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+    "source_file": "synthetic_finance_demo.pdf",
+    "status": "ready",
+    "failed_stage": null,
+    "error_code": null,
+    "safe_error_message": null,
+    "created_at": "2026-10-04T13:19:33.051753Z",
+    "updated_at": "2026-10-04T13:19:35.147172Z"
+  },
+  "collection": {
+    "state": {
+      "workspace_id": "demo",
+      "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+      "stage": "awaiting_confirmation",
+      "candidates": [
+        {
+          "workspace_id": "demo",
+          "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+          "source_ref": "revenue:9715ae84ffd20a29da7d8c7d12ff275a2fc37e439ab971123571e6c17f02a13d",
+          "chunk_id": "9c3386e9652abde01040aafe5bea4133e80eb7901cf05c76abef86f77850638d",
+          "source_file": "synthetic_finance_demo.pdf",
+          "page": 1,
+          "period": 2024,
+          "value": "1000000",
+          "unit": "CNY_YUAN",
+          "evidence": [
+            {
+              "chunk_id": "9c3386e9652abde01040aafe5bea4133e80eb7901cf05c76abef86f77850638d",
+              "source_file": "synthetic_finance_demo.pdf",
+              "page": 1,
+              "text": "合成资料：虚构企业甲\n完全虚构，仅用于软件演示；不对应真实公司。\n经营摘要：年度营业收入\n2025年度营业收入：120万元。\n2024年度营业收入：100万元。\n金额单位：万元。期间口径：对应完整年度。\n第1页，共2页",
+              "start": 63,
+              "end": 80,
+              "raw_value": "100",
+              "raw_unit": "万元"
+            }
+          ],
+          "extraction_method": "revenue_line_rule",
+          "extraction_version": "v1"
+        },
+        {
+          "workspace_id": "demo",
+          "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10",
+          "source_ref": "revenue:8c5908bb4d18fc28b0f5fa849ed22fb0382e7a81124470daaf1da988a0cc2cd6",
+          "chunk_id": "9c3386e9652abde01040aafe5bea4133e80eb7901cf05c76abef86f77850638d",
+          "source_file": "synthetic_finance_demo.pdf",
+          "page": 1,
+          "period": 2025,
+          "value": "1200000",
+          "unit": "CNY_YUAN",
+          "evidence": [
+            {
+              "chunk_id": "9c3386e9652abde01040aafe5bea4133e80eb7901cf05c76abef86f77850638d",
+              "source_file": "synthetic_finance_demo.pdf",
+              "page": 1,
+              "text": "合成资料：虚构企业甲\n完全虚构，仅用于软件演示；不对应真实公司。\n经营摘要：年度营业收入\n2025年度营业收入：120万元。\n2024年度营业收入：100万元。\n金额单位：万元。期间口径：对应完整年度。\n第1页，共2页",
+              "start": 45,
+              "end": 62,
+              "raw_value": "120",
+              "raw_unit": "万元"
+            }
+          ],
+          "extraction_method": "revenue_line_rule",
+          "extraction_version": "v1"
+        }
+      ],
+      "confirmed_facts": [],
+      "result": null,
+      "failure_code": null
+    },
+    "hits": [
+      {
+        "score": 0.6586198806762695,
+        "chunk_id": "9c3386e9652abde01040aafe5bea4133e80eb7901cf05c76abef86f77850638d",
+        "text": "合成资料：虚构企业甲\n完全虚构，仅用于软件演示；不对应真实公司。\n经营摘要：年度营业收入\n2025年度营业收入：120万元。\n2024年度营业收入：100万元。\n金额单位：万元。期间口径：对应完整年度。\n第1页，共2页",
+        "page": 1,
+        "source_file": "synthetic_finance_demo.pdf",
+        "type": "paragraph",
+        "section": "未分节",
+        "table_md": null,
+        "workspace_id": "demo",
+        "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10"
+      },
+      {
+        "score": 0.5479777455329895,
+        "chunk_id": "c072b9936a8b169bab5b634b5b9ccdf53f8044581d42b40139451fb6c3f1bb90",
+        "text": "合成资料：虚构企业甲\n完全虚构，仅用于软件演示；不对应真实公司。\n经营摘要：年末员工人数\n2025年末员工人数：12人。\n人数单位：人。时点口径：2025年末。\n本资料未提供员工年龄信息，无法据此确定平均年龄。\n第2页，共2页",
+        "page": 2,
+        "source_file": "synthetic_finance_demo.pdf",
+        "type": "paragraph",
+        "section": "未分节",
+        "table_md": null,
+        "workspace_id": "demo",
+        "document_id": "06fbb86673d370e86d5a5429ceb5aa8922df4c7288f86d588950bf2ca8c02a10"
+      }
+    ],
+    "excluded_periods": []
+  },
+  "paid_llm_called": false,
+  "confirmed_or_calculated": false,
+  "limitations": [
+    "ASGI in-process HTTP; no browser/TCP deployment verification",
+    "fixed annual revenue line syntax; no general financial/table extraction",
+    "isolated local candidate service; not exposed by Agent runtime tools",
+    "no persistent confirmation, invalidation or calculation integration"
+  ],
+  "source_sha256": {
+    "app/agent/research_workflow.py": "00e3ed914d76b67e3b715e08d1b549b3b8dce837c61b94418a30e05c325e3fb6",
+    "app/agent/revenue_extraction.py": "104cff79f6644c7a30a66d5d49d0529d0f15b1a1753d9557d79ee989dd95008f",
+    "scripts/verify_revenue_candidates.py": "49cb8c19482f1c68a5f11b71751c78c5dd78229d71300ca01a20f40bf6d6861c",
+    "app/rag/retriever.py": "27530ff4e67137f73838cd588b3c79bf639c9ac9da5578babb8d79c4080933e2",
+    "app/rag/store.py": "f49e4b9cc6ce403f9768c18dcc8e66942c445628c6b3bb02acfefb2dc03266bf",
+    "app/api/runtime_factory.py": "b77e42bad8c8ce2b7683d03fc4e92dd849ff4b4ed295b4716f55d86e4caca39d"
+  }
+}
