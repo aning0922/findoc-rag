@@ -329,6 +329,67 @@ PDF bytes 为替身，确认是显式模拟。真实上传、实际检索、操�
   仅在成功数据根的新副本中追加 PDF 字节，保留原数据库的内容摘要与确认记录；
   CLI 返回 `source_changed`、result=null、退出1。该故障注入证明实际文件会重新核对，
   不表示产品新增同 ID 替换上传功能；原成功来源、确认与报告均保留。
+
 - [验证汇总](../artifacts/revenue-confirmation/verification.json)：定向70 passed，
   Ruff/4源码mypy/diff检查通过。其余拒绝、损坏与事务故障使用明确标注的替身输入和
   模拟动作。旧业务卷未挂载，模型缓存只读，无网络、无 LLM，新临时容器执行后移除。
+
+## 收入研究的最小图调度合同（2026-10-06）
+
+- `app/agent/revenue_graph.py` 提供独立 `build_revenue_graph(service=...)` 装配入口，
+  返回实际编译的 LangGraph 图；执行使用 `await graph.ainvoke(input)`。
+  不接生产 Agent runtime、HTTP/UI，不调用 LLM。
+- 锁定 `langgraph==1.2.13`，其 `langchain-core>=1.4.7,<2` 与现有 `1.5.0`
+  兼容；锁文件只新增 langgraph、langgraph-checkpoint 4.2.0、langgraph-prebuilt
+  1.1.0、langgraph-sdk 0.4.5、ormsgpack 1.12.2，原有包无升级或删除。
+  安装的精确签名与官方 [Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+  对照；传递依赖的存在不表示启用其能力。
+- `RevenueGraphInput` 只接受 `document_id` 与可选 `confirmation_id`。
+  ID 是查询定位信息，不证明文档范围、授权、确认存在或仍有效；不接收裸金额、
+  accepted、操作者类型或调用方自报来源版本。
+- `RevenueGraphState` 只保存两 ID、本次候选/版本摘要、调度状态、结果、错误码和
+  错误类别。摘要包含 snapshot_id、来源 revision 与期间/规范金额/单位；
+  金额摘要不进入公式，snapshot_id 只是比较键。服务、仓储、连接与 Retriever
+  在图外组装并通过闭包注入；不设计 checkpoint 序列化。
+- 原 `RevenueWorkflowState` 与业务转移函数继续由候选/确认/计算服务复用，
+  图 State 只传递单次执行数据，不重新定义候选、确认或来源真值。
+
+| 节点 | 读取 | 调用/更新 | 下一步 |
+|---|---|---|---|
+| `read_review` | document_id | `service.preview`；写当前摘要及 previewed，清除旧结果/错误 | previewed → check_confirmation；业务拒绝/程序失败 → END |
+| `check_confirmation` | confirmation_id | 无 ID → needs_confirmation；有合法非空 ID → verification_pending | verification_pending → calculate；其他 → END |
+| `calculate` | 两 ID | `service.calculate`；成功写 completed/结果；确认缺失写 needs_confirmation，其他业务拒绝写 refused，意外异常写 failed | 全部 → END |
+
+- 条件边只读取节点已经写入的 status；不查库、不调用服务、不再次检索。
+  verification_pending 仅表示存在查询线索，不表示确认有效。
+- 核验/计算节点复用现有应用服务：当前来源查证、SQLite 完整有效确认读回、
+  范围受限事实查询、唯一公式与舍入、返回前再次来源查证均保持原实现。
+  图的读取摘要节点增加一次 preview；服务 calculate 内部的必要查证保留。
+  正常成功合计三次候选收集（preview 一次、calculate 前后两次），条件边零检索。
+- 节点返回局部字段更新，默认按字段覆盖；未返回字段会保留，故所有失败出口
+  显式写 result=None，读取节点也清除上次输出。输入 schema 限制外部仅传 ID，
+  重用旧输出不会发布旧结果。未配置消息列表、自定义 reducer、并行节点。
+- `RevenueConfirmationError` 的稳定业务码映射为需要确认或拒绝；已有文档不存在/
+  非 ready 异常映射为 source_unavailable。其他 Exception 记录完整内部日志并返回
+  failed/program/unexpected_error，不向结果暴露原异常，也不宣称业务成功。
+  错误成功对象属于程序失败；不捕获取消等 BaseException，不配置盲重试。
+- 图端口仅包含 preview/calculate，没有 confirm；图不创建确认、不伪造接受动作，
+  只读取已有记录。机械集成测试的接受动作明确使用 simulated_test。
+- 顺序函数与 if 也可实现本例。图提供显式调度与分支、局部状态更新及可观察节点
+  顺序，同时增加类型/装配/依赖成本；业务校验仍在应用服务。
+
+验证按证据层分别记录：
+
+- `tests/test_revenue_graph_routing.py`：完全 fake 业务服务，只证明图路由、异常分类、
+  不重试与失败无结果，不能代替业务集成。
+- `tests/test_revenue_graph.py`：实际 compile/ainvoke/astream + 真实确认服务、SQLite、
+  现有抽取与计算；检索及 PDF bytes 是替身，确认标 simulated_test。完整成功 payload
+  与相同限定输入的直接调用一致；覆盖无/未知确认、快照变化、实际替身文件摘要变化、
+  计算后来源重查、零分母、旧输出清理及节点顺序。
+- `scripts/verify_revenue_graph.py`：仅对显式 disposable ready 副本运行，真实 Retriever、
+  实际合成 PDF 与既有 local_operator 确认；对照直接服务与图的完整成功 payload，
+  核对缺 ID、未知 ID 和副本实际文件内容变化的拒绝/result=null，再恢复副本文件。
+  不调用 confirm，不修改旧成功数据根或旧业务卷，不覆盖历史评测。
+- [实际图验证报告](../artifacts/revenue-graph/actual-verification.json) 与
+  [定向验证汇总](../artifacts/revenue-graph/verification.json) 记录版本、源码摘要、结果
+  与验证边界；不配置 checkpoint/interrupt/恢复/长期记忆，也不替换生产 runtime。

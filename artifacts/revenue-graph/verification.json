@@ -1,0 +1,63 @@
+{
+  "pytest": {
+    "passed": 95,
+    "existing_swig_warnings": 5,
+    "new_graph_integration_cases": 11,
+    "pure_graph_fake_cases": 5,
+    "scope": [
+      "revenue_graph",
+      "revenue_graph_routing",
+      "revenue_confirmation",
+      "revenue_review_cli",
+      "research_workflow",
+      "revenue_extraction",
+      "finance_tools",
+      "financial_metrics"
+    ]
+  },
+  "ruff": "passed",
+  "mypy": {
+    "source_files": 2,
+    "status": "passed"
+  },
+  "uv_lock_check": "passed",
+  "dependency_changes": {
+    "added": {
+      "langgraph": "1.2.13",
+      "langgraph-checkpoint": "4.2.0",
+      "langgraph-prebuilt": "1.1.0",
+      "langgraph-sdk": "0.4.5",
+      "ormsgpack": "1.12.2"
+    },
+    "upgraded_or_removed": []
+  },
+  "actual_report": "actual-verification.json",
+  "actual_full_payload_equal": true,
+  "original_database_and_pdf_preserved": true,
+  "existing_confirmation_and_fact_rows": [
+    1,
+    2
+  ],
+  "temporary_container_removed": true,
+  "old_services_started": false,
+  "old_runtime_volumes_mounted": false,
+  "model_cache_mount": "findoc-d1_model-cache; readonly",
+  "network": "none",
+  "image_id": "sha256:87c5f32a587d99d7eaa7cbf6abc8058da7fc8ce1ed2ef1105518340c8c67d640",
+  "confirmation_created": false,
+  "paid_llm_called": false,
+  "source_sha256": {
+    "app/agent/revenue_graph.py": "e904313d0c41a67431f11663909f57eaeb2e28a7752c154a1a4e6720f99cf547",
+    "app/agent/revenue_confirmation.py": "44c0fb2434bc6af5cfce4deb88534805a8334e645af255865171e1ecd6f2f51a",
+    "app/agent/sqlite_financial_facts.py": "32f4c7d718e03d73fa7f3db7e1ef9c606134ef899fb005706c7fc51dab7f0b0c",
+    "app/agent/research_workflow.py": "7a28174eb417529dd10a881270f7d1ddd60632fc80aa95a767f7cfc949848afb",
+    "app/agent/revenue_extraction.py": "28dc7fbe67f28ab9eda11e09f3df5297a2d2e0aaa51d0bc49d3bae00c6da8ad6",
+    "app/agent/finance_tools.py": "eda996b6dede04f3d81852efd8645fb0930ef806b09e3f0e1871828440ff2905",
+    "scripts/verify_revenue_graph.py": "2f6d48d9b557249842eb204a67b50d1e27e468248638949345173d890cbfb8a2"
+  },
+  "limitations": [
+    "No checkpoint/interrupt/recovery/parallel/UI or production runtime integration",
+    "Pure graph fake cases do not establish business correctness; SQLite integration uses explicit retrieval/PDF bytes doubles and simulated_test acceptance",
+    "Actual path uses existing synthetic PDF and existing local_operator confirmation"
+  ]
+}
