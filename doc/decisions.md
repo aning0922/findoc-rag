@@ -393,3 +393,252 @@ PDF bytes 为替身，确认是显式模拟。真实上传、实际检索、操�
 - [实际图验证报告](../artifacts/revenue-graph/actual-verification.json) 与
   [定向验证汇总](../artifacts/revenue-graph/verification.json) 记录版本、源码摘要、结果
   与验证边界；不配置 checkpoint/interrupt/恢复/长期记忆，也不替换生产 runtime。
+
+## 收入研究产品入口、终态存储与历史读取合同（2026-10-08，待实现）
+
+本节规定独立收入研究产品路径。现有本地候选、确认、SQLite 事实与收入图已经实现；
+本节新增的 HTTP 路由、公开 DTO、研究终态仓储及页面尚未实现。
+目标限于单文档、营业收入、2024/2025 两期、本地操作者和同步完成的一次图执行。
+不改变现有 `/chat`、`/agent/runs`、AgentRun 及 answered/refusal/system_error 合同。
+
+### 用户操作与四个标识
+
+1. 选择 ready 文档并点击审阅：展示规范金额、原始金额/单位、期间、文件/页码、
+   全部合并来源及原文位置；没有确认写入，也不创建长期研究记录。
+2. 明确接受这次展示的完整候选：服务端重新收集并比较所见快照，完全一致才沿用
+   现有整组确认事务；变化则要求重新审阅，不静默接受新候选。
+3. 明确运行研究：只用文档与确认查询线索执行一次收入图；结束后验证并保存完整
+   终态，提交成功才返回可用研究 ID。图不代替操作者确认。
+4. 刷新或重新打开已知研究 ID：只读已保存终态，并标明历史文档与执行时间。
+
+| 标识 | 用途与产生方 | 持久性/边界 |
+|---|---|---|
+| `document_id` | 已有文档记录身份；页面取自文档选择 | 查询后还须服务端核对范围和 ready；文件名不能替代 |
+| `snapshot_id` | `RevenueReview.snapshot_id` 对完整内部 review 生成的 SHA-256 内容比较键 | 不是确认 ID，也不是数据库行 ID；审阅不单独保存快照表 |
+| `confirmation_id` | 现有仓储成功保存明确接受后返回的唯一确认身份 | 绑定完整快照及两期事实；相同仍有效快照复用原 ID/时间 |
+| `research_id` | 研究应用服务为一次已结束图调用分配的唯一身份 | 只有完整终态提交成功才对外返回；不是图 checkpoint/thread ID |
+
+`document_id` 相同不足以证明完整审阅内容相同。当前没有同 ID 替换 PDF 产品入口；
+候选/证据/抽取版本变化仍须通过快照比较发现。确认记录保留不等于当前仍可计算。
+跨文档确认、未确认候选或客户端自造金额不得进入公式。
+
+### 四个 HTTP 入口与严格请求
+
+后端路径如下；浏览器沿现有 Vite 代理使用 `/api` 前缀。
+所有请求 DTO 禁止额外字段，采用严格类型；不把数字转字符串、不把字符串转布尔。
+ID 使用严格非空字符串并拒绝纯空白；`snapshot_id` 必须为 64 位小写十六进制。
+workspace、操作者类型、金额、单位、来源版本、候选和研究身份均不得由请求创造。
+
+| 操作/入口 | 请求 | 成功响应 | 服务责任 |
+|---|---|---|---|
+| `POST /revenue-research/reviews` | `{document_id}` | 200，完整 Review DTO | 范围/ready 前置核对后调用 `preview`；不写确认/研究 |
+| `POST /revenue-research/confirmations` | `{document_id, snapshot_id, accepted}` | 200，已提交 Confirmation DTO，含复用回执 | `accepted` 必须严格为 true；转换为服务参数 `reviewed_snapshot_id`；服务端固定 `local_operator` |
+| `POST /revenue-research/runs` | `{document_id, confirmation_id?}` | 201，已提交 Research DTO，可能成功、拒绝或失败 | 范围/ready 核准后一次 `graph.ainvoke`；验证终态、一次保存后返回 |
+| `GET /revenue-research/runs/{research_id}` | 路径 ID，无执行 body | 200，与 POST 相同的已保存 Research DTO | 固定服务端范围查库并校验；不执行图/检索/确认/计算 |
+
+`accepted=false` 是明确未接受：409/confirmation_required，不查候选、不保存。
+`accepted` 缺失、类型错误及额外字段为 422/invalid_revenue_request。
+运行的 `confirmation_id` 可缺省或为 null：允许图形成可保存的 confirmation_required
+拒绝；若提供字符串则要求非空。格式合法但未知或属于其他文档的确认 ID 也属于
+运行时业务核验，不提前制造“有效确认”。页面正常链必须先获得确认回执才开放运行。
+
+### 公开 DTO 与序列化边界
+
+所有公开对象禁止额外字段，金额由 Decimal 格式化为十进制字符串，期间/页码/位置
+使用严格整数，时间使用带时区 ISO 8601。不公开 workspace、对象 key、SQLite/物理
+路径、原始异常、检索分数、模型输出或内部图 State。文件名使用已有逻辑文件名。
+公开投影从服务返回的对象构造，不用客户端 payload 恢复事实；嵌套对象同样白名单。
+
+- **Revision DTO**：`content_sha256`、`attempt`、`extraction_method`、
+  `extraction_version`。文档身份由外层携带，workspace 留在内部范围与存储元数据。
+- **Evidence DTO**：`chunk_id/source_file/page/text/start/end/raw_value/raw_unit`；
+  保留全部证据原文、原始金额/单位与位置，禁止只取 evidence[0]。
+- **Candidate DTO**：`source_ref/chunk_id/source_file/page/period/value/unit/`
+  `extraction_method/extraction_version/evidence`；正常 review 两期均为 CNY_YUAN，
+  evidence 非空，按期间排序。两条规范值及证据应能核对 100 万元→1000000 元、
+  120 万元→1200000 元；有限抽取规则的限制保持现有合同。
+- **Review DTO**：`schema="revenue-research-review-v1"`、`document_id/source_file/`
+  `snapshot_id/revision/candidates`。必须显式取 `review.snapshot_id`，当前
+  `RevenueReview.to_payload()` 不包含此字段；图的 ReviewSummary 不足以代替完整审阅。
+- **Confirmation DTO**：`schema="revenue-research-confirmation-v1"`、
+  `document_id/confirmation_id/confirmed_at/snapshot_id/confirmation_kind`；本产品入口
+  的 kind 固定为 local_operator。机械测试另用 simulated_test 并标明，不能冒充本人接受。
+- **Calculation DTO**：沿用 `ConfirmedRevenueCalculation.to_payload()` 的语义，含
+  `confirmation_id/confirmed_at/confirmation_kind/snapshot_id/revision/value/unit/`
+  `formula_id/inputs`；revision 与 inputs 使用上述公开投影。`value="20.00"`、
+  `unit="PERCENT"`、`formula_id="revenue_growth_rate_v1"` 来自唯一现有计算器。
+  inputs 包含两期完整候选及全部证据；不经过 float，不从图摘要再次组装金额。
+
+公开投影省去内部 scope 字段不改变快照算法。snapshot 仍根据现有完整内部
+`RevenueReview.to_payload()` 计算；客户端只回传摘要，不根据公开 DTO 自行重新计算。
+
+**Research DTO** 的公共字段为 `schema="revenue-research-result-v1"`、
+`research_id/document_id/source_file/confirmation_id/started_at/finished_at`；
+`confirmation_id` 保存本次输入查询线索，可为 null，不宣称其一定有效。
+按 `status` 区分三种互斥结果：
+
+| status | calculation | error_code/message |
+|---|---|---|
+| `completed` | 必填且必须是通过校验的 Calculation DTO | 两字段均为 null |
+| `refused` | 必填且只能为 null | 必填稳定业务码和固定安全说明 |
+| `failed` | 必填且只能为 null | 固定 unexpected_error 与安全说明 |
+
+成功计算的确认身份必须等于请求确认 ID，来源文档/逻辑文件名必须与核准文档一致，
+两期/单位/公式和完整输入证据必须符合现有合同。图 completed 却缺/错结果，或未知图
+状态，不允许补造计算值，作为 failed/unexpected_error 保存。映射不重新计算公式。
+已知稳定业务错误从现有确认服务、Workflow 与计算器枚举维护显式白名单及固定说明；
+未知码安全收窄为 failed/unexpected_error，不直通异常字符串。
+
+图的 needs_confirmation 映射为 refused/confirmation_required；refused 保留已知
+业务原因；failed 映射为 failed/unexpected_error。previewed/verification_pending
+是内部中间态，不能作为公开终态保存。图内部 error_kind、review_summary 不直通 HTTP。
+拒绝/失败不发布候选快照为“已核准版本”，不携带旧 calculation；只有成功计算已有
+的 revision/inputs 被保存为该次执行来源。HTTP 与持久读回使用相同的判别联合校验。
+
+### 请求与响应小例
+
+以下 D1/S1/C1/R1 为讲解用符号，示例中 64 个 a 是符合字段格式的占位摘要 S1，
+实际 ID/摘要须由服务端返回，不能拿占位值确认真实文档。省略的嵌套内容只为
+缩短示例，真实响应必须满足前述完整 DTO，不得返回省略号。
+
+```http
+POST /revenue-research/reviews
+Content-Type: application/json
+
+{"document_id":"D1"}
+```
+
+200 的响应包含 document_id=D1、source_file=synthetic.pdf、snapshot_id=S1、
+完整 revision 与两条 candidates。2024 的 value="1000000"、2025 的
+value="1200000"，unit 均为 CNY_YUAN；evidence 保留第 1 页的原文“100万元”与“120万元”。
+
+```http
+POST /revenue-research/confirmations
+Content-Type: application/json
+
+{"document_id":"D1","snapshot_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","accepted":true}
+```
+
+正常 200 回执示意：
+
+```json
+{"schema":"revenue-research-confirmation-v1","document_id":"D1","confirmation_id":"C1","confirmed_at":"2026-10-08T02:00:00Z","snapshot_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","confirmation_kind":"local_operator"}
+```
+
+服务端重查快照不同则 409，无 confirmation_id：
+
+```json
+{"detail":{"code":"review_changed","message":"审阅内容已变化，请重新审阅后明确接受"}}
+```
+
+```http
+POST /revenue-research/runs
+Content-Type: application/json
+
+{"document_id":"D1","confirmation_id":"C1"}
+```
+
+正常提交后 201：公共身份/时间、status=completed、完整 calculation（包含
+value="20.00"、PERCENT、唯一 formula_id、确认快照、来源版本与两期输入），
+error_code/message 均为 null。不能仅返回一个没有来源的百分数。
+
+格式合法但未知确认输入的已保存拒绝示意（仍为 201）：
+
+```json
+{"schema":"revenue-research-result-v1","research_id":"R2","document_id":"D1","source_file":"synthetic.pdf","confirmation_id":"unknown-confirmation","started_at":"2026-10-08T02:05:00Z","finished_at":"2026-10-08T02:05:01Z","status":"refused","calculation":null,"error_code":"confirmation_required","message":"缺少可用确认，请重新审阅并明确接受"}
+```
+
+`GET /revenue-research/runs/R2` 返回 200 及同一份已保存拒绝，不替它补做确认。
+成功 R1 的 GET 同样只读原成功记录，不能按当前候选重写 revision 或 20.00%。
+
+### 前置 HTTP 错误与可保存业务终态
+
+前置核对由应用服务在图调用之前执行；运行已进入图后的业务核验由原图/确认服务
+负责。同类问题因发生阶段不同可能表现为前置 HTTP 错误或已保存终态，应显式分清。
+
+| 场景 | 响应/记录 | 页面行为 |
+|---|---|---|
+| 输入非法、额外字段、快照格式错误 | 422/invalid_revenue_request；不执行、不写库 | 说明请求不合法，无研究 ID |
+| 收入依赖未注入 | 503/revenue_service_unavailable；不初始化重依赖 | 显示服务未启用 |
+| 所选文档不存在或越界 | 404/document_not_found；两者同响应，不执行图 | 清理当前操作数据，重新选择 |
+| 前置时文档未 ready | 409/document_not_ready；无确认/研究写入 | 等文档可用后明确操作 |
+| reviews/confirmations 的候选/来源业务问题 | 409/对应已知稳定码；不新增确认/研究 | 清除旧回执/结果，说明原因；review_changed 必须重审 |
+| confirmations 的确认记录损坏 | 500/confirmation_integrity_error；不静默修复或新增成功回执 | 显示无法完成确认，禁止以旧值计算 |
+| reviews/confirmations 的 SQLite 或意外异常 | 500/revenue_storage_error 或 revenue_internal_error；安全说明，无原异常 | 不显示成功回执，不自动重发 |
+| 图运行中缺/未知/跨文档确认 | needs_confirmation→已保存 refused/confirmation_required，201 | 显示拒绝与研究 ID；无计算结果，引导审阅/确认 |
+| 图运行中来源变更等已知业务拒绝 | 已保存 refused/原稳定码，201 | 撤下旧计算结果；不自动确认或重算 |
+| 图捕获程序异常 | 已保存 failed/unexpected_error，201 | 显示已保存失败及 ID，不展示计算值 |
+| 图算出结果但终态保存失败 | 500/revenue_storage_error；不返回 research_id 或 calculation | 不能宣称结果已保存；不自动重发 POST |
+| GET 未知或其他范围研究 ID | 404/research_not_found | 无历史结果；不改为 POST |
+| GET 损坏 JSON、身份不符、未知 schema、状态/结果不匹配 | 500/research_result_integrity_error | 安全失败；不部分展示或通过重新计算修复 |
+| GET 数据库读取失败 | 500/revenue_storage_error | 历史读取失败，不生成 failed 研究来替代原记录 |
+
+HTTP 错误壳统一为 `{"detail":{"code":"稳定码","message":"固定安全说明"}}`，不带
+研究 ID/旧结果。运行图内若底层 SQLite 异常已被图映射成 failed，则在研究终态能够
+成功保存时返回已保存 failed；不能笼统把所有 SQLite 问题写成同一阶段的 HTTP 错误。
+取消/进程中断等没有完整终态的情形不保证保存，不把它们伪造成图正常结束。
+
+### 研究终态存储与 GET
+
+在已有 `documents.db` 增量增加独立 `revenue_research_results` 表，不改旧 agent-runs.db。
+最小元数据列：`research_id` 主键、服务端 `workspace_id`、`document_id`、逻辑
+`source_file`、可空 `confirmation_id` 查询线索、`schema_version`、`status`、
+`started_at/finished_at`、`payload_json`。schema_version 初始为 1，status 限定三终态。
+payload 为校验后完整公开 Research DTO；元数据与 payload 的身份、状态、时间/版本
+须一致，GET 时再次验证。只存必要业务终态，不存服务对象、连接、内部 State 或消息轨迹。
+
+confirmation_id 不设无条件确认外键：未知/跨文档 ID 是可能的正常拒绝输入，必须
+允许记录本次查询线索及拒绝。document 身份也按执行时快照保存，不以 GET 查询当前
+文档状态来补授权或删除历史；内部 workspace 查询范围始终来自服务端配置。
+
+应用服务流程：前置核准文档并记录服务端身份→记录 started_at→一次图调用→
+记录 finished_at→映射/校验公开终态→分配 research_id→构造并校验完整记录→
+仓储一次 INSERT 事务提交→返回 201。仓储异常回滚，不返回内部分配的 ID。
+响应编码可能在提交之后遇到网络故障，因此只承诺收到的 ID 对应已提交记录，
+不承诺未收到 ID 就一定没有记录。公开投影/序列化校验须尽量在 INSERT 前完成。
+
+确认保存与研究保存是两个明确用户动作、两次事务，不能宣称跨动作原子性。
+研究仓储只有 save_terminal 与固定范围 get_terminal；没有 queued/running 状态表，
+不建跨确认总体 Run 状态机，不追踪未完成审阅，也不承诺进程中断恢复。
+GET 不要求历史文档此刻 ready，不读取当前文件/检索库/确认可用性，不宣称当前
+来源有效；仅返回执行时记录的身份与成功结果已有来源版本。重新核验是新的明确运行。
+
+### 页面责任与后续文件地图
+
+页面使用明确的审阅、接受、运行按钮；accepted 不能在挂载、刷新或图中自动发生。
+切换文档、开始重审或确认/运行失败时撤下当前旧回执/计算；历史数据库记录保留。
+pending 防重复点击，并以请求所属文档/活动请求身份阻止迟到响应覆盖新选择。
+只保留一个独立的已知 research_id 引用用于刷新 GET（或提供手动输入）；
+不复用旧 Agent 本机历史索引，不保存候选原文/密钥，不建研究历史列表。
+历史结果明确展示它自己的文档/文件与执行时间，不能冒充当前所选文档的新结果。
+断网/取消等待而没收到 ID 时显示“结果未知”，不自动重发任何运行 POST。
+完整幂等键、运行中恢复、后台 worker、SSE、checkpoint 与历史中心留后续。
+
+| 接入阶段 | 实际文件落点（拟新增文件明确标注） | 职责 |
+|---|---|---|
+| 审阅/确认 HTTP | 既有 `app/api/runtime_factory.py` | 复用 document_service、object_store、document_preparer、同一 Retriever 与 documents.db；组装 CandidateService→SourceReader→ConfirmationRepository→ConfirmationService |
+| 审阅/确认 HTTP | 既有 `app/api/app.py` | 可选注入收入依赖、服务端范围并挂载独立 router；缺依赖安全 503 |
+| 审阅/确认 HTTP | 拟新增 `app/api/revenue_research.py`、`app/api/revenue_research_schemas.py` | 四入口中的 reviews/confirmations，严格 DTO、完整证据/快照、安全错误壳；后续在同文件补 runs/GET |
+| 审阅/确认 HTTP | 既有 `app/agent/revenue_confirmation.py`、`app/agent/sqlite_financial_facts.py` | 复用已有 preview/confirm/calculate 与整组确认，不重写公式或快照算法；公开 DTO 补 snapshot 属于 API 投影 |
+| 图执行/持久 GET | 拟新增 `app/agent/revenue_research.py`、`app/agent/revenue_research_storage.py` | 单次研究应用服务、终态模型/安全投影及仓储端口；无跨确认总体状态机 |
+| 图执行/持久 GET | 拟新增 `app/agent/sqlite_revenue_research_repository.py` | 同库增量建独立表，一次事务保存、固定范围读取、版本/完整性验证；不复用确认外键阻断拒绝 |
+| 图执行/持久 GET | 既有 `app/agent/revenue_graph.py`、上述 router/schema/factory/app | 复用一次 ainvoke 与 END；装配研究服务，增加 POST/GET 及判别联合；不把持久写入塞到图边 |
+| 薄页面 | 既有 `frontend/src/App.tsx`、`frontend/src/index.css`、`frontend/src/requestOwnership.ts` | 复用文档选择/视觉/请求归属，接入独立收入区域 |
+| 薄页面 | 拟新增 `frontend/src/RevenueResearchPanel.tsx`、`frontend/src/revenueResearchRequest.ts`、`frontend/src/revenueResearchResult.ts`、`frontend/src/revenueResearchReference.ts` | 三个明确动作、独立 DTO 解码/状态/历史标识、已知 ID GET；旧 Agent 文件不泛化 |
+
+以上命名为实施落点，若局部合并须保留责任边界。现有 runtime 启动仍有 LLM 配置
+与资源检查，收入图本身不调用 LLM；本接入不顺带改造旧配置体系。同步检索/SQLite
+沿现有 asyncio.to_thread 边界，HTTP await 服务，GET 只委托库读取；不阻塞事件循环。
+
+### 实施验收边界（待执行）
+
+- 审阅返回完整证据及服务端快照；严格请求拒绝多余 scope/金额/类型；服务端固定
+  local_operator，review_changed 不新增确认，相同有效快照复用原回执。
+- 真实服务与临时 SQLite 下验证一次图→完整成功及业务拒绝终态→重建服务 GET；
+  未知确认可保存拒绝，成功计算存在、拒绝/失败 calculation=null，写失败无可用 ID。
+- GET 检索/确认/计算调用数均不增加；未知/跨范围/损坏/未知版本安全失败，来源改变
+  后历史成功仍只读原执行版本。保存失败、HTTP 前置失败、已保存 failed 分别断言。
+- 页面明确操作、切文档与迟到响应、防重复点击、刷新只 GET、未知结果不自动重发；
+  受控 E2E 与真实上传/检索/本人确认链分层留证，不能以模拟确认冒充操作者接受。
+- 当前本节仅合同设计，未新增代码骨架、未运行服务/模型或测试；既有验证报告保持
+  原版本与范围，不作为新增 HTTP/UI/持久研究结果已经完成的证据。
